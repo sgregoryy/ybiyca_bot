@@ -1,0 +1,7 @@
+services:
+  app:
+    build: .
+    container_name: some_name
+    ports:
+      - "81:81"
+    restart: always
