@@ -27,27 +27,27 @@ async def check_user_channel_subscription(bot: Bot, user_id: int, channel_id: in
         logger.error(f"Ошибка при проверке подписки пользователя {user_id} на канал {channel_id}: {e}")
         return False
 
-async def get_user_available_channels(telegram_user_id: int) -> List[Channel]:
+async def get_user_available_channel(telegram_user_id: int) -> Optional[Channel]:
     """
-    Получает список каналов, к которым пользователь имеет доступ согласно его подписке
+    Получает канал, к которому пользователь имеет доступ согласно его подписке
     
     Args:
         telegram_user_id: ID пользователя в Telegram
         
     Returns:
-        Список каналов, к которым пользователь имеет доступ
+        Канал, к которому пользователь имеет доступ, или None
     """
     # Получаем активную подписку пользователя
     subscription_data = await SubscriptionDAL.get_by_telegram_id(telegram_user_id)
     if not subscription_data:
-        return []  # Нет активной подписки
+        return None  # Нет активной подписки
     
     subscription, plan, _ = subscription_data
     
-    # Получаем каналы, доступные по тарифному плану
-    channels = await ChannelDAL.get_channels_by_plan(plan.id)
+    # Получаем канал, к которому дает доступ тарифный план
+    channel = await ChannelDAL.get_by_id(plan.channel_id)
     
-    return channels
+    return channel
 
 async def check_user_channel_access(telegram_user_id: int, channel_id: int) -> bool:
     """
@@ -60,70 +60,96 @@ async def check_user_channel_access(telegram_user_id: int, channel_id: int) -> b
     Returns:
         True если пользователь имеет доступ к каналу, False в противном случае
     """
-    # Получаем доступные каналы
-    available_channels = await get_user_available_channels(telegram_user_id)
+    # Получаем активную подписку пользователя
+    subscription_data = await SubscriptionDAL.get_by_telegram_id(telegram_user_id)
+    if not subscription_data:
+        return False  # Нет активной подписки
     
-    # Проверяем, есть ли нужный канал в списке доступных
-    return any(channel.id == channel_id for channel in available_channels)
+    subscription, plan, _ = subscription_data
+    
+    # Проверяем, дает ли тарифный план доступ к запрашиваемому каналу
+    return plan.channel_id == channel_id
 
-async def get_user_channel_invites(telegram_user_id: int) -> List[Dict[str, Any]]:
+async def get_user_channel_invite(telegram_user_id: int) -> Optional[Dict[str, Any]]:
     """
-    Получает список ссылок-приглашений в каналы, к которым пользователь имеет доступ
+    Получает ссылку-приглашение в канал, к которому пользователь имеет доступ
     
     Args:
         telegram_user_id: ID пользователя в Telegram
         
     Returns:
-        Список словарей с информацией о каналах (id, name, invite_link)
+        Словарь с информацией о канале (id, name, telegram_id, invite_link) или None
     """
-    # Получаем каналы, к которым пользователь имеет доступ
-    channels = await get_user_available_channels(telegram_user_id)
+    # Получаем канал, к которому пользователь имеет доступ
+    channel = await get_user_available_channel(telegram_user_id)
     
-    # Формируем список ссылок-приглашений
-    invites = []
-    for channel in channels:
-        invites.append({
-            "id": channel.id,
-            "name": channel.name,
-            "telegram_id": channel.channel_id,
-            "invite_link": channel.invite_link
-        })
+    if not channel:
+        return None
     
-    return invites
+    return {
+        "id": channel.id,
+        "name": channel.name,
+        "telegram_id": channel.channel_id,
+        "invite_link": channel.invite_link
+    }
 
-async def check_and_invite_to_channels(bot: Bot, telegram_user_id: int) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+async def check_and_invite_to_channel(bot: Bot, telegram_user_id: int) -> Tuple[bool, Optional[Dict[str, Any]]]:
     """
-    Проверяет подписку пользователя на доступные ему каналы и возвращает списки
-    каналов, на которые пользователь уже подписан, и каналов, на которые ему нужно подписаться
+    Проверяет подписку пользователя на доступный ему канал
     
     Args:
         bot: Объект бота
         telegram_user_id: ID пользователя в Telegram
         
     Returns:
-        Кортеж из двух списков: каналы, на которые пользователь уже подписан, и каналы,
-        на которые пользователю нужно подписаться
+        Кортеж (подписан ли пользователь, информация о канале)
     """
-    # Получаем каналы, к которым пользователь имеет доступ
-    available_channels = await get_user_available_channels(telegram_user_id)
+    # Получаем канал, к которому пользователь имеет доступ
+    channel = await get_user_available_channel(telegram_user_id)
     
-    subscribed_channels = []
-    need_to_subscribe_channels = []
+    if not channel:
+        return False, None
     
-    # Проверяем подписку на каждый канал
-    for channel in available_channels:
-        is_subscribed = await check_user_channel_subscription(bot, telegram_user_id, channel.channel_id)
+    # Проверяем подписку на канал
+    is_subscribed = await check_user_channel_subscription(bot, telegram_user_id, channel.channel_id)
+    
+    channel_info = {
+        "id": channel.id,
+        "name": channel.name,
+        "telegram_id": channel.channel_id,
+        "invite_link": channel.invite_link
+    }
+    
+    return is_subscribed, channel_info
+
+async def process_join_request(bot: Bot, user_id: int, requested_channel_id: int) -> bool:
+    """
+    Проверяет, имеет ли пользователь право на доступ к запрашиваемому каналу
+    
+    Args:
+        bot: Объект бота
+        user_id: ID пользователя в Telegram
+        requested_channel_id: ID канала в Telegram
         
-        channel_info = {
-            "id": channel.id,
-            "name": channel.name,
-            "telegram_id": channel.channel_id,
-            "invite_link": channel.invite_link
-        }
+    Returns:
+        True если пользователь имеет доступ, False иначе
+    """
+    try:
+        # Получаем канал из базы данных
+        channel = await ChannelDAL.get_by_telegram_id(requested_channel_id)
+        if not channel:
+            logger.warning(f"Канал {requested_channel_id} не найден в базе данных")
+            return False
         
-        if is_subscribed:
-            subscribed_channels.append(channel_info)
+        # Проверяем, имеет ли пользователь доступ к каналу
+        has_access = await check_user_channel_access(user_id, channel.id)
+        
+        if has_access:
+            logger.info(f"Пользователь {user_id} имеет доступ к каналу {requested_channel_id}")
         else:
-            need_to_subscribe_channels.append(channel_info)
-    
-    return subscribed_channels, need_to_subscribe_channels
+            logger.info(f"Пользователь {user_id} не имеет доступа к каналу {requested_channel_id}")
+        
+        return has_access
+    except Exception as e:
+        logger.error(f"Ошибка при проверке доступа к каналу: {e}")
+        return False

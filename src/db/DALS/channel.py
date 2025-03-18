@@ -306,6 +306,35 @@ class ChannelDAL:
         
         return result
     
+    async def get_channels_with_plans() -> List[Tuple[Channel, List[TariffPlan]]]:
+        """
+        Получить все каналы с их тарифными планами
+        
+        Returns:
+            Список кортежей (канал, список тарифных планов)
+        """
+        # Получаем все каналы
+        channels = await ChannelDAL.get_all_channels()
+        result = []
+        
+        for channel in channels:
+            # Получаем тарифные планы для канала напрямую
+            tariffs_query = (
+                select(TariffPlan)
+                .where(and_(
+                    TariffPlan.channel_id == channel.id,
+                    TariffPlan.is_active == True
+                ))
+                .order_by(TariffPlan.display_order)
+            )
+            
+            tariffs_result = await ChannelDAL.db.fetch(tariffs_query)
+            tariffs = [row[0] for row in tariffs_result]
+            
+            result.append((channel, tariffs))
+        
+        return result
+    
     @staticmethod
     async def check_user_has_access_to_channel(telegram_user_id: int, channel_id: int) -> bool:
         """

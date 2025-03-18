@@ -14,8 +14,10 @@ from src.db.DALS.channel import ChannelDAL
 from src.config import config
 from src.db.database import init_db, close_db_connection
 from src.db.DALS.tariff import TariffDAL
-from src.handlers import start, subscription, payment, admin, admin_tariff
-from src.payments import stars
+from src.handlers import start, subscription, payment, admin, admin_tariff, admin_channel
+from src.payments import stars, cryptobot, tinkoff, youkassa
+from src.utils import join_request
+from src.utils.cron_func import check_expired_subscriptions, check_subscriptions_ending_soon
 from src.filters.admin import AdminFilter
 from src.filters.sub import SubscriptionFilter
 from src.webhook import yoo_router, tinkoff_router, cryptobot_router
@@ -32,10 +34,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-"""
-Функция для инициализации методов оплаты, включая звезды
-"""
-
 async def init_payment_methods():
     """Инициализация методов оплаты"""
     from src.db.DALS.currency import CurrencyDAL
@@ -43,12 +41,12 @@ async def init_payment_methods():
     
     logger.info("Инициализация методов оплаты и валют...")
     
-    # Инициализируем валюты - только рубль
+
     default_currencies = [
         {"code": "RUB", "name": "Российский рубль", "symbol": "₽", "requires_manual_confirmation": True}
     ]
     
-    # Создаем валюты по одной
+
     for currency_data in default_currencies:
         try:
             currency = await CurrencyDAL.get_by_code(currency_data["code"])
@@ -65,7 +63,7 @@ async def init_payment_methods():
         except Exception as e:
             logger.error(f"Ошибка при создании валюты {currency_data['code']}: {e}")
     
-    # Дополнительно создаем валюту STARS, если включена оплата звездами
+
     if config.payment.stars_enabled:
         try:
             stars_currency = await CurrencyDAL.get_by_code("STARS")
@@ -82,9 +80,9 @@ async def init_payment_methods():
         except Exception as e:
             logger.error(f"Ошибка при создании валюты STARS: {e}")
     
-    # Инициализируем методы оплаты
+
     
-    # Ручной платеж (карта)
+
     if config.payment.manual_payment_enabled:
         try:
             manual_method = await PaymentMethodDAL.get_by_code("manual")
@@ -101,7 +99,7 @@ async def init_payment_methods():
         except Exception as e:
             logger.error(f"Ошибка при создании метода оплаты 'manual': {e}")
     
-    # ЮKassa
+
     if config.payment.youkassa_enabled:
         try:
             youkassa_method = await PaymentMethodDAL.get_by_code("youkassa")
@@ -118,7 +116,7 @@ async def init_payment_methods():
         except Exception as e:
             logger.error(f"Ошибка при создании метода оплаты 'youkassa': {e}")
     
-    # Tinkoff
+
     if config.payment.tinkoff_enabled:
         try:
             tinkoff_method = await PaymentMethodDAL.get_by_code("tinkoff")
@@ -135,7 +133,7 @@ async def init_payment_methods():
         except Exception as e:
             logger.error(f"Ошибка при создании метода оплаты 'tinkoff': {e}")
     
-    # Звезды Telegram
+
     if config.payment.stars_enabled:
         try:
             stars_method = await PaymentMethodDAL.get_by_code("stars")
@@ -152,7 +150,7 @@ async def init_payment_methods():
         except Exception as e:
             logger.error(f"Ошибка при создании метода оплаты 'stars': {e}")
     
-    # CryptoBot
+
     if config.payment.cryptobot_enabled:
         try:
             crypto_method = await PaymentMethodDAL.get_by_code("cryptobot")
@@ -217,7 +215,14 @@ async def init_tariff_plans():
         {"name": "1 год", "code": "1_year", "price": 7000, "duration_days": 365, "display_order": 4},
     ]
     
-    await TariffDAL.initialize_default_plans(default_plans)
+    if config.channels.multi_channel_mode:
+        channels = await ChannelDAL.get_active_channels()
+        if channels:
+            default_channel_id = channels[0].id
+            await TariffDAL.initialize_default_plans(default_plans, default_channel_id)
+    else:
+        await TariffDAL.initialize_default_plans(default_plans)
+    
     logger.info("Тарифные планы инициализированы")
 
 
@@ -237,10 +242,35 @@ async def init_channels():
     logger.info("Каналы инициализированы")
 
 
+async def scheduled_task_checker(bot: Bot):
+    """Запускает периодические проверки подписок и отправку уведомлений"""
+    while True:
+        try:
+            logger.info("Запуск проверки истёкших подписок")
+            await check_expired_subscriptions(bot)
+            
+
+            logger.info("Запуск проверки подписок, истекающих через 1 день")
+            await check_subscriptions_ending_soon(bot, days_threshold=1)
+            
+
+            logger.info("Запуск проверки подписок, истекающих через 3 дня")
+            await check_subscriptions_ending_soon(bot, days_threshold=3)
+            
+        except Exception as e:
+            logger.error(f"Ошибка при выполнении периодических задач: {e}")
+        
+
+        await asyncio.sleep(6 * 60 * 60)
+
+
 async def on_startup(bot: Bot):
     """Действия при запуске бота"""
     logger.info("Инициализация базы данных...")
     await init_db()
+    
+    logger.info("Инициализация каналов...")
+    await init_channels()
     
     logger.info("Инициализация тарифных планов...")
     await init_tariff_plans()
@@ -248,8 +278,8 @@ async def on_startup(bot: Bot):
     logger.info("Инициализация методов оплаты...")
     await init_payment_methods()
     
-    logger.info("Инициализация каналов...")
-    await init_channels()
+
+    asyncio.create_task(scheduled_task_checker(bot))
     
     logger.info("Бот успешно запущен!")
 
@@ -302,34 +332,43 @@ async def start_bot_with_web_service(bot: Bot, dp: Dispatcher):
         await asyncio.gather(bot_task, web_task, return_exceptions=True)
 
 
-"""
-Обновления для основного файла __main__.py
-"""
-
 async def main():
     """Точка входа в приложение"""
-    # Инициализация бота и диспетчера
+
     bot = Bot(token=config.telegram.token)
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
     
-    # Регистрация хендлеров запуска и остановки
+
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
     
-    # Регистрация фильтров
+
     if config.telegram.require_subscription:
         dp.message.filter(SubscriptionFilter())
     
-    # Регистрация маршрутизаторов
+
     dp.include_router(start.router)
     dp.include_router(subscription.router)
     dp.include_router(payment.router)
-    dp.include_router(stars.router)  # Добавляем маршрутизатор для звезд
-    dp.include_router(admin.router)
-    dp.include_router(admin_tariff.router)
+    dp.include_router(join_request.router)
     
-    # Настройка обработчиков сигналов для корректного завершения
+
+    if config.payment.stars_enabled:
+        dp.include_router(stars.router)
+    
+
+    admin_router = admin.router
+    dp.include_router(admin_router)
+    
+
+    if config.admin.manage_tariffs_enabled:
+        dp.include_router(admin_tariff.router)
+    
+    if config.admin.manage_channels_enabled and config.channels.multi_channel_mode:
+        dp.include_router(admin_channel.router)
+    
+
     loop = asyncio.get_running_loop()
     
     stop_event = asyncio.Event()
@@ -339,7 +378,7 @@ async def main():
         if not stop_event.is_set():
             stop_event.set()
     
-    # На Windows обработчики сигналов не поддерживаются
+
     if platform.system() != "Windows":
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(
@@ -348,16 +387,13 @@ async def main():
     
     try:
         if is_web_service_needed():
-            # Запуск в режиме long polling с отдельным веб-сервисом
             await start_bot_with_web_service(bot, dp)
         else:
-            # Запуск только бота в режиме long polling
             await start_polling(bot, dp)
             
     except Exception as e:
         logger.error(f"Необработанное исключение: {e}")
     finally:
-        # Освобождаем ресурсы
         await bot.session.close()
 
 

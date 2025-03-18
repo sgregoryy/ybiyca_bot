@@ -18,6 +18,10 @@ import asyncio
 router = Router()
 logger = logging.getLogger(__name__)
 
+# Применяем фильтр AdminFilter ко всем обработчикам в маршрутизаторе
+router.message.filter(AdminFilter())
+router.callback_query.filter(AdminFilter())
+
 # Функционал рассылки сообщений
 async def broadcast_message(bot, text, disable_notification=False):
     """
@@ -58,23 +62,12 @@ async def broadcast_message(bot, text, disable_notification=False):
     
     return success_count
 
-router.message.filter(AdminFilter())
-
 @router.message(Command("admin"))
 async def cmd_admin(message: Message):
-    # Проверяем, является ли пользователь администратором перед отображением панели
-    if message.from_user.id not in config.telegram.admin_ids:
-        return
-
     await message.answer("👑 Панель администратора", reply_markup=AdminKeyboard.admin_menu())
 
 @router.callback_query(F.data == "admin:statistics")
 async def show_statistics(callback: CallbackQuery):
-    # Проверяем, является ли пользователь администратором
-    if callback.from_user.id not in config.telegram.admin_ids:
-        await callback.answer("У вас нет доступа к этой функции", show_alert=True)
-        return
-    
     # Получаем общее количество пользователей
     total_users = len(await UserDAL.get_all())
     
@@ -117,11 +110,7 @@ async def show_statistics(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin:broadcast")
 async def start_broadcast(callback: CallbackQuery, state: FSMContext):
-    # Проверяем, является ли пользователь администратором
-    if callback.from_user.id not in config.telegram.admin_ids:
-        await callback.answer("У вас нет доступа к этой функции", show_alert=True)
-        return
-    
+    # Проверяем только доступность функции, т.к. AdminFilter уже применен
     await state.set_state(AdminStates.waiting_for_broadcast_message)
     await callback.message.answer(
         "📨 Отправьте сообщение, которое хотите разослать всем пользователям"
@@ -130,10 +119,6 @@ async def start_broadcast(callback: CallbackQuery, state: FSMContext):
 
 @router.message(AdminStates.waiting_for_broadcast_message)
 async def process_broadcast_message(message: Message, state: FSMContext):
-    # Проверяем, является ли пользователь администратором
-    if message.from_user.id not in config.telegram.admin_ids:
-        return
-    
     broadcast_text = message.text or message.caption
     
     if not broadcast_text:
@@ -150,11 +135,7 @@ async def process_broadcast_message(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "admin:manage_tariffs")
 async def manage_tariffs(callback: CallbackQuery):
-    # Проверяем, является ли пользователь администратором и включена ли функция управления тарифами
-    if callback.from_user.id not in config.telegram.admin_ids:
-        await callback.answer("У вас нет доступа к этой функции", show_alert=True)
-        return
-    
+    # Проверяем только доступность функции, т.к. AdminFilter уже применен
     if not config.admin.manage_tariffs_enabled:
         await callback.answer("Функция управления тарифами отключена", show_alert=True)
         return
@@ -180,11 +161,7 @@ async def manage_tariffs(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin:manage_channels")
 async def manage_channels(callback: CallbackQuery):
-    # Проверяем, является ли пользователь администратором и включена ли функция управления каналами
-    if callback.from_user.id not in config.telegram.admin_ids:
-        await callback.answer("У вас нет доступа к этой функции", show_alert=True)
-        return
-    
+    # Проверяем только доступность функции, т.к. AdminFilter уже применен
     if not config.admin.manage_channels_enabled or not config.channels.multi_channel_mode:
         await callback.answer("Функция управления каналами отключена или бот не настроен на мультиканальный режим", show_alert=True)
         return

@@ -9,7 +9,7 @@ from src.db.models import TariffPlan
 from src.keyboards.inline import SubscriptionKeyboard
 from src.keyboards.reply import MainKeyboard
 from src.utils.states import PaymentStates
-from src.utils.channel_access import get_user_channel_invites, check_and_invite_to_channels
+from src.utils.channel_access import check_user_channel_subscription, get_user_available_channel
 from src.db.DALS.user import UserDAL
 from src.db.DALS.subscription import SubscriptionDAL
 from src.db.DALS.tariff import TariffDAL
@@ -69,7 +69,7 @@ async def show_channel_tariffs(callback: CallbackQuery):
         await callback.answer("Канал не найден", show_alert=True)
         return
     
-    # Получаем тарифные планы для канала
+    # Получаем тарифные планы для канала - теперь напрямую связанные с этим каналом
     tariffs = await TariffDAL.get_tariffs_by_channel(channel_id)
     
     if not tariffs:
@@ -381,83 +381,115 @@ async def show_subscriptions(message: Message):
         full_name=f"{message.from_user.first_name} {message.from_user.last_name or ''}",
     )
 
-    # Получаем доступные пользователю каналы
-    available_channels = await ChannelDAL.get_user_available_channels(message.from_user.id)
-
-    if available_channels:
-        subscribed_channels, need_to_subscribe_channels = await check_and_invite_to_channels(
-            message.bot, message.from_user.id
-        )
-
-        subscription_text = f"📺 <b>Ваши подписки</b>\n\n"
-
-        if subscribed_channels or need_to_subscribe_channels:
-            subscription_text += f"📺 <b>Доступные каналы:</b>\n"
-
-            if subscribed_channels:
-                subscription_text += "\n✅ <b>Вы уже подписаны:</b>\n"
-                for i, channel in enumerate(subscribed_channels, 1):
-                    subscription_text += f"{i}. {channel['name']}\n"
-
-            if need_to_subscribe_channels:
-                subscription_text += "\n❗️ <b>Необходимо подписаться:</b>\n"
-                for i, channel in enumerate(need_to_subscribe_channels, 1):
-                    subscription_text += f"{i}. {channel['name']}\n"
-
-        await message.answer(subscription_text, parse_mode="HTML")
-
-        if need_to_subscribe_channels:
-            builder = InlineKeyboardBuilder()
-
-            for channel in need_to_subscribe_channels:
-                builder.add(InlineKeyboardButton(text=f"Подписаться на {channel['name']}", url=channel["invite_link"]))
-
-            builder.add(
-                InlineKeyboardButton(text="🔄 Обновить статус подписок", callback_data="update_channel_subscriptions")
+    # Получаем активную подписку пользователя
+    subscription_data = await SubscriptionDAL.get_by_telegram_id(message.from_user.id)
+    
+    if subscription_data:
+        subscription, plan, _ = subscription_data
+        
+        # Получаем канал, к которому дает доступ тариф
+        channel = await ChannelDAL.get_by_id(plan.channel_id)
+        
+        if channel:
+            # Проверяем, подписан ли пользователь на канал в Telegram
+            is_subscribed = await check_user_channel_subscription(
+                message.bot, 
+                message.from_user.id, 
+                channel.channel_id
             )
-
-            builder.adjust(1)
-
+            
+            subscription_text = f"📺 <b>Ваша подписка</b>\n\n"
+            subscription_text += f"Тариф: <b>{plan.name}</b>\n"
+            subscription_text += f"Срок действия: до <b>{subscription.end_date.strftime('%d.%m.%Y')}</b>\n\n"
+            
+            subscription_text += f"📺 <b>Доступный канал:</b>\n"
+            
+            if is_subscribed:
+                subscription_text += f"\n✅ <b>Вы уже подписаны на канал:</b>\n"
+                subscription_text += f"- {channel.name}\n"
+            else:
+                subscription_text += f"\n❗️ <b>Необходимо подписаться:</b>\n"
+                subscription_text += f"- {channel.name}\n"
+            
+            await message.answer(subscription_text, parse_mode="HTML")
+            
+            if not is_subscribed:
+                builder = InlineKeyboardBuilder()
+                builder.add(InlineKeyboardButton(
+                    text=f"Подписаться на {channel.name}", 
+                    url=channel.invite_link
+                ))
+                builder.add(InlineKeyboardButton(
+                    text="🔄 Обновить статус подписки", 
+                    callback_data="update_channel_subscription"
+                ))
+                
+                builder.adjust(1)
+                
+                await message.answer(
+                    "Для получения полного доступа, пожалуйста, подпишитесь на канал:",
+                    reply_markup=builder.as_markup()
+                )
+        else:
             await message.answer(
-                "Для получения полного доступа, пожалуйста, подпишитесь на все доступные каналы:",
-                reply_markup=builder.as_markup(),
+                "⚠️ Ошибка: канал для вашего тарифа не найден. Обратитесь к администратору.",
+                parse_mode="HTML"
             )
     else:
         subscription_text = (
             f"📺 <b>У вас нет активных подписок</b>\n\n"
             f"Нажмите на кнопку '💼 Тарифы', чтобы выбрать канал и подходящий тариф"
         )
-
+        
         await message.answer(subscription_text, parse_mode="HTML")
 
 
-@router.callback_query(F.data == "update_channel_subscriptions")
-async def update_channel_subscriptions(callback: CallbackQuery):
-    subscribed_channels, need_to_subscribe_channels = await check_and_invite_to_channels(
-        callback.bot, callback.from_user.id
+@router.callback_query(F.data == "update_channel_subscription")
+async def update_channel_subscription(callback: CallbackQuery):
+    """Обновляет статус подписки на канал"""
+    subscription_data = await SubscriptionDAL.get_by_telegram_id(callback.from_user.id)
+    
+    if not subscription_data:
+        await callback.message.edit_text("У вас нет активных подписок.")
+        await callback.answer()
+        return
+    
+    subscription, plan, _ = subscription_data
+    
+    # Получаем канал, к которому дает доступ тариф
+    channel = await ChannelDAL.get_by_id(plan.channel_id)
+    
+    if not channel:
+        await callback.message.edit_text("Ошибка: канал для вашего тарифа не найден.")
+        await callback.answer()
+        return
+    
+    # Проверяем, подписан ли пользователь на канал в Telegram
+    is_subscribed = await check_user_channel_subscription(
+        callback.bot, 
+        callback.from_user.id, 
+        channel.channel_id
     )
-
-    if not need_to_subscribe_channels:
-        await callback.message.edit_text("✅ Отлично! Вы подписаны на все доступные каналы.")
+    
+    if is_subscribed:
+        await callback.message.edit_text(f"✅ Отлично! Вы подписаны на канал {channel.name}.")
     else:
-        text = "Для получения полного доступа, пожалуйста, подпишитесь на все доступные каналы:\n\n"
-
-        for i, channel in enumerate(need_to_subscribe_channels, 1):
-            text += f"{i}. {channel['name']}\n"
-
+        text = f"Для получения доступа, пожалуйста, подпишитесь на канал {channel.name}:"
+        
         builder = InlineKeyboardBuilder()
-
-        for channel in need_to_subscribe_channels:
-            builder.add(InlineKeyboardButton(text=f"Подписаться на {channel['name']}", url=channel["invite_link"]))
-
-        builder.add(
-            InlineKeyboardButton(text="🔄 Обновить статус подписок", callback_data="update_channel_subscriptions")
-        )
-
+        builder.add(InlineKeyboardButton(
+            text=f"Подписаться на {channel.name}", 
+            url=channel.invite_link
+        ))
+        builder.add(InlineKeyboardButton(
+            text="🔄 Обновить статус подписки", 
+            callback_data="update_channel_subscription"
+        ))
+        
         builder.adjust(1)
-
+        
         await callback.message.edit_text(text, reply_markup=builder.as_markup())
-
+    
     await callback.answer()
 
 

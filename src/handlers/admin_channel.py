@@ -3,6 +3,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
+from src.db.DALS.subscription import SubscriptionDAL
 from src.utils.states import AdminStates
 from src.keyboards.inline import AdminKeyboard
 from src.db.DALS.channel import ChannelDAL
@@ -170,17 +171,11 @@ async def process_channel_link(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("channel:add_plan:"))
 async def add_plan_to_channel(callback: CallbackQuery):
-    # Проверяем, является ли пользователь администратором
-    if callback.from_user.id not in config.telegram.admin_ids:
-        await callback.answer("У вас нет доступа к этой функции", show_alert=True)
-        return
+    # Все проверки на администратора уже сделаны через AdminFilter
     
     parts = callback.data.split(":")
     channel_id = int(parts[2])
     plan_id = int(parts[3])
-    
-    # Добавляем тарифный план к каналу
-    await ChannelDAL.add_plan_to_channel(channel_id, plan_id)
     
     # Получаем информацию о канале и плане
     channel = await ChannelDAL.get_by_id(channel_id)
@@ -190,10 +185,17 @@ async def add_plan_to_channel(callback: CallbackQuery):
         await callback.answer("Канал или тарифный план не найден", show_alert=True)
         return
     
+    # Обновляем тарифный план, устанавливая привязку к каналу
+    updated_plan = await TariffDAL.update(plan_id, channel_id=channel_id)
+    
+    if not updated_plan:
+        await callback.answer("Не удалось привязать тариф к каналу", show_alert=True)
+        return
+    
     await callback.answer(f"Тариф {plan.name} добавлен к каналу {channel.name}", show_alert=True)
     
     # Обновляем список тарифных планов в сообщении
-    plans = await ChannelDAL.get_plans_for_channel(channel_id)
+    plans = await TariffDAL.get_tariffs_by_channel(channel_id)
     plan_names = [p.name for p in plans]
     plans_text = ", ".join(plan_names) if plan_names else "Нет тарифов"
     
@@ -213,7 +215,7 @@ async def add_plan_to_channel(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     for p in all_plans:
         # Проверяем, добавлен ли уже этот план
-        is_added = any(existing_plan.id == p.id for existing_plan in plans)
+        is_added = p.channel_id == channel_id
         prefix = "✅ " if is_added else ""
         
         builder.add(InlineKeyboardButton(
@@ -232,17 +234,11 @@ async def add_plan_to_channel(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("channel:remove_plan:"))
 async def remove_plan_from_channel(callback: CallbackQuery):
-    # Проверяем, является ли пользователь администратором
-    if callback.from_user.id not in config.telegram.admin_ids:
-        await callback.answer("У вас нет доступа к этой функции", show_alert=True)
-        return
+    # Все проверки на администратора уже сделаны через AdminFilter
     
     parts = callback.data.split(":")
     channel_id = int(parts[2])
     plan_id = int(parts[3])
-    
-    # Удаляем тарифный план из канала
-    await ChannelDAL.remove_plan_from_channel(channel_id, plan_id)
     
     # Получаем информацию о канале и плане
     channel = await ChannelDAL.get_by_id(channel_id)
@@ -252,10 +248,29 @@ async def remove_plan_from_channel(callback: CallbackQuery):
         await callback.answer("Канал или тарифный план не найден", show_alert=True)
         return
     
-    await callback.answer(f"Тариф {plan.name} удален из канала {channel.name}", show_alert=True)
+    # Проверяем, есть ли активные подписки на этот тариф
+    plan_stats = await SubscriptionDAL.get_plan_statistics()
+    has_active_subscriptions = plan.name in plan_stats and plan_stats[plan.name] > 0
+    
+    if has_active_subscriptions:
+        await callback.answer(
+            "Невозможно отвязать тариф от канала, так как существуют активные подписки на него.",
+            show_alert=True
+        )
+        return
+    
+    # Отвязываем тарифный план от канала (устанавливаем channel_id в NULL или в ID другого канала)
+    # В вашей схеме лучше деактивировать тариф или переназначить ему другой канал
+    updated_plan = await TariffDAL.update(plan_id, is_active=False)
+    
+    if not updated_plan:
+        await callback.answer("Не удалось отвязать тариф от канала", show_alert=True)
+        return
+    
+    await callback.answer(f"Тариф {plan.name} отвязан от канала {channel.name}", show_alert=True)
     
     # Обновляем список тарифных планов в сообщении
-    plans = await ChannelDAL.get_plans_for_channel(channel_id)
+    plans = await TariffDAL.get_tariffs_by_channel(channel_id)
     plan_names = [p.name for p in plans]
     plans_text = ", ".join(plan_names) if plan_names else "Нет тарифов"
     
@@ -275,7 +290,7 @@ async def remove_plan_from_channel(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     for p in all_plans:
         # Проверяем, добавлен ли уже этот план
-        is_added = any(existing_plan.id == p.id for existing_plan in plans)
+        is_added = p.channel_id == channel_id and p.is_active
         prefix = "✅ " if is_added else ""
         
         builder.add(InlineKeyboardButton(
