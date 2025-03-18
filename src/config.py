@@ -41,6 +41,7 @@ class PaymentConfig:
     manual_payment_enabled: bool = True
     manual_card_number: str = ""
     manual_recipient_name: str = ""
+    manual_channel_id: str = ""
     
     stars_enabled: bool = False
     
@@ -197,8 +198,7 @@ def load_config(env_path: Optional[str] = None) -> Config:
             manual_payment_enabled=manual_payment_enabled,
             manual_card_number=os.getenv('MANUAL_CARD_NUMBER', ''),
             manual_recipient_name=os.getenv('MANUAL_RECIPIENT_NAME', ''),
-            stars_enabled=stars_enabaled,
-            available_methods=payment_methods,
+            manual_channel_id=os.getenv('MANUAL_CHANNEL_ID', ''),
             youkassa_enabled=youkassa_enabled,
             youkassa_shop_id=os.getenv('YOUKASSA_SHOP_ID'),
             youkassa_secret_key=os.getenv('YOUKASSA_SECRET_KEY'),
@@ -206,7 +206,9 @@ def load_config(env_path: Optional[str] = None) -> Config:
             tinkoff_terminal_key=os.getenv('TINKOFF_TERMINAL_KEY'),
             tinkoff_secret_key=os.getenv('TINKOFF_SECRET_KEY'),
             cryptobot_enabled=cryptobot_enabled,
-            cryptobot_token=os.getenv('CRYPTOBOT_TOKEN')
+            cryptobot_token=os.getenv('CRYPTOBOT_TOKEN'),
+            stars_enabled=stars_enabaled,
+            available_methods=payment_methods,
         ),
         tariff=TariffConfig(
             default_plans=default_plans

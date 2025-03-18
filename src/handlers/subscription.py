@@ -249,25 +249,25 @@ async def process_payment_screenshot(message: Message, state: FSMContext):
         reply_markup=MainKeyboard.main_menu(),
     )
 
-    for admin_id in config.telegram.admin_ids:
-        try:
 
-            await message.bot.send_photo(
-                chat_id=admin_id,
-                photo=file_id,
-                caption=(
-                    f"🔔 <b>Новая заявка на оплату</b>\n\n"
-                    f"👤 Пользователь: {message.from_user.full_name} (@{message.from_user.username})\n"
-                    f"💰 Сумма: {final_price} {currency.symbol}\n"
-                    f"📋 Тариф: {plan.name}\n"
-                    f"💳 Способ оплаты: {payment_method.name}\n"
-                    f"🆔 ID платежа: {payment.id}"
-                ),
-                reply_markup=AdminKeyboard.payment_approval(payment.id),
-                parse_mode="HTML",
-            )
-        except Exception as e:
-            logger.error(f"Ошибка при отправке уведомления администратору {admin_id}: {e}")
+    try:
+
+        await message.bot.send_photo(
+            chat_id=config.payment.manual_channel_id,
+            photo=file_id,
+            caption=(
+                f"🔔 <b>Новая заявка на оплату</b>\n\n"
+                f"👤 Пользователь: {message.from_user.full_name} (@{message.from_user.username})\n"
+                f"💰 Сумма: {final_price} {currency.symbol}\n"
+                f"📋 Тариф: {plan.name}\n"
+                f"💳 Способ оплаты: {payment_method.name}\n"
+                f"🆔 ID платежа: {payment.id}"
+            ),
+            reply_markup=AdminKeyboard.payment_approval(payment.id),
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при отправке уведомления администратору {config.payment.manual_channel_id}: {e}")
 
 
 @router.message(F.text.in_(["📺 Подписка", "📺 Подписки"]))
