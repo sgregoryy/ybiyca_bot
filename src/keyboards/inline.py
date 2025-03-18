@@ -2,6 +2,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
 from src.db.models import PaymentMethod, TariffPlan, Currency
 from typing import List, Optional
+from src.config import config
 
 class SubscriptionKeyboard:
     @staticmethod
@@ -175,14 +176,20 @@ class AdminKeyboard:
     @staticmethod
     def admin_menu():
         builder = InlineKeyboardBuilder()
+        
+        # Эти функции всегда доступны
         builder.add(
             InlineKeyboardButton(text="📊 Статистика", callback_data="admin:statistics"),
-            InlineKeyboardButton(text="📨 Рассылка", callback_data="admin:broadcast"),
-            InlineKeyboardButton(text="💰 Платежи", callback_data="admin:payments"),
-            InlineKeyboardButton(text="📝 Управление тарифами", callback_data="admin:manage_tariffs"),
-            InlineKeyboardButton(text="📺 Управление каналами", callback_data="admin:manage_channels"),
-            InlineKeyboardButton(text="💸 Методы оплаты", callback_data="admin:payment_methods")
+            InlineKeyboardButton(text="📨 Рассылка", callback_data="admin:broadcast")
         )
+        
+        # Опциональные функции, зависящие от конфигурации
+        if config.admin.manage_tariffs_enabled:
+            builder.add(InlineKeyboardButton(text="📝 Управление тарифами", callback_data="admin:manage_tariffs"))
+            
+        if config.admin.manage_channels_enabled and config.channels.multi_channel_mode:
+            builder.add(InlineKeyboardButton(text="📺 Управление каналами", callback_data="admin:manage_channels"))
+        
         builder.adjust(1)
         return builder.as_markup()
         
@@ -210,78 +217,6 @@ class AdminKeyboard:
             InlineKeyboardButton(text="➕ Добавить канал", callback_data="channel:add"),
             InlineKeyboardButton(text="✏️ Редактировать каналы", callback_data="channel:list_edit"),
             InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_menu")
-        )
-        builder.adjust(1)
-        return builder.as_markup()
-    
-    @staticmethod
-    def payment_methods_menu():
-        """
-        Создает клавиатуру для управления методами оплаты
-        
-        Returns:
-            Клавиатура для управления методами оплаты
-        """
-        builder = InlineKeyboardBuilder()
-        builder.add(
-            InlineKeyboardButton(text="➕ Добавить метод", callback_data="payment_method:add"),
-            InlineKeyboardButton(text="✏️ Редактировать методы", callback_data="payment_method:list_edit"),
-            InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_menu")
-        )
-        builder.adjust(1)
-        return builder.as_markup()
-    
-    @staticmethod
-    def payment_methods_list(methods: List[PaymentMethod]):
-        """
-        Создает клавиатуру со списком методов оплаты
-        
-        Args:
-            methods: список методов оплаты
-            
-        Returns:
-            Клавиатура со списком методов оплаты
-        """
-        builder = InlineKeyboardBuilder()
-        
-        for method in methods:
-            status = "✅" if method.is_active else "❌"
-            builder.add(InlineKeyboardButton(
-                text=f"{status} {method.name}",
-                callback_data=f"payment_method:edit:{method.id}"
-            ))
-        
-        builder.add(InlineKeyboardButton(
-            text="◀️ Назад",
-            callback_data="admin:payment_methods"
-        ))
-        
-        builder.adjust(1)
-        return builder.as_markup()
-        
-    @staticmethod
-    def payment_method_edit(method_id: int, is_active: bool):
-        """
-        Создает клавиатуру для редактирования метода оплаты
-        
-        Args:
-            method_id: ID метода оплаты
-            is_active: активен ли метод
-            
-        Returns:
-            Клавиатура для редактирования метода оплаты
-        """
-        builder = InlineKeyboardBuilder()
-        builder.add(
-            InlineKeyboardButton(text="Название", callback_data=f"payment_method:field:name:{method_id}"),
-            InlineKeyboardButton(text="Комиссия", callback_data=f"payment_method:field:fee:{method_id}"),
-            InlineKeyboardButton(text="Настройки", callback_data=f"payment_method:field:settings:{method_id}"),
-            InlineKeyboardButton(
-                text=f"Активность: {'Вкл ✅' if is_active else 'Выкл ❌'}", 
-                callback_data=f"payment_method:toggle:{method_id}"
-            ),
-            InlineKeyboardButton(text="Валюты", callback_data=f"payment_method:currencies:{method_id}"),
-            InlineKeyboardButton(text="◀️ Назад", callback_data="payment_method:list_edit")
         )
         builder.adjust(1)
         return builder.as_markup()

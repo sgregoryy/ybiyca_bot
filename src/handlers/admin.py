@@ -9,6 +9,7 @@ from src.db.DALS.user import UserDAL
 from src.db.DALS.subscription import SubscriptionDAL
 from src.db.DALS.tariff import TariffDAL
 from src.db.DALS.payment import PaymentDAL
+from src.db.DALS.channel import ChannelDAL
 from src.config import config
 import datetime
 import logging
@@ -61,6 +62,9 @@ router.message.filter(AdminFilter())
 
 @router.message(Command("admin"))
 async def cmd_admin(message: Message):
+    # Проверяем, является ли пользователь администратором перед отображением панели
+    if message.from_user.id not in config.telegram.admin_ids:
+        return
 
     await message.answer("👑 Панель администратора", reply_markup=AdminKeyboard.admin_menu())
 
@@ -80,28 +84,33 @@ async def show_statistics(callback: CallbackQuery):
     # Получаем новых пользователей за сегодня
     new_users_today = len(await UserDAL.get_new_users_today())
     
-    # Получаем ожидающие платежи
+    # Получаем статистику платежей (всегда отображается)
     pending_payments = await PaymentDAL.count_pending()
-    
-    # Получаем статистику доходов
     approved_payments = await PaymentDAL.get_revenue_stats()
-    total_revenue = approved_payments["total_revenue"]
+    total_revenue = approved_payments.get("total_revenue", 0)
+    payment_count = approved_payments.get("payment_count", 0)
     
-    # Получаем подписки по тарифам
-    plan_stats = await SubscriptionDAL.get_plan_statistics()
+    # Получаем подписки по тарифам, только если функция управления тарифами включена
+    plan_stats = {}
+    if config.admin.manage_tariffs_enabled:
+        plan_stats = await SubscriptionDAL.get_plan_statistics()
     
     stats_text = (
         f"📊 <b>Статистика бота</b>\n\n"
         f"👥 Всего пользователей: {total_users}\n"
         f"✅ Активных подписок: {active_users}\n"
-        f"🆕 Новых пользователей сегодня: {new_users_today}\n"
-        f"⏳ Ожидающих проверки платежей: {pending_payments}\n"
-        f"💰 Общий доход: {total_revenue}₽\n\n"
-        f"📋 <b>Подписки по тарифам:</b>\n"
+        f"🆕 Новых пользователей сегодня: {new_users_today}\n\n"
+        f"💰 <b>Статистика платежей:</b>\n"
+        f"💸 Всего платежей: {payment_count}\n"
+        f"💵 Общий доход: {total_revenue}₽\n"
+        f"⏳ Ожидающих проверки: {pending_payments}\n\n"
     )
     
-    for plan_name, count in plan_stats.items():
-        stats_text += f"- {plan_name}: {count}\n"
+    # Добавляем информацию о тарифах, только если функция управления тарифами включена
+    if config.admin.manage_tariffs_enabled and plan_stats:
+        stats_text += f"📋 <b>Подписки по тарифам:</b>\n"
+        for plan_name, count in plan_stats.items():
+            stats_text += f"- {plan_name}: {count}\n"
     
     await callback.message.edit_text(stats_text, reply_markup=AdminKeyboard.admin_menu(), parse_mode='HTML')
     await callback.answer()
@@ -139,48 +148,15 @@ async def process_broadcast_message(message: Message, state: FSMContext):
     
     await message.answer(f"✅ Рассылка завершена. Сообщение доставлено {success_count} пользователям.")
 
-@router.callback_query(F.data == "admin:payments")
-async def show_pending_payments(callback: CallbackQuery):
-    # Проверяем, является ли пользователь администратором
-    if callback.from_user.id not in config.telegram.admin_ids:
-        await callback.answer("У вас нет доступа к этой функции", show_alert=True)
-        return
-    
-    # Получаем ожидающие платежи
-    pending_payments = await PaymentDAL.get_pending_payments()
-    
-    if not pending_payments:
-        await callback.message.edit_text(
-            "📌 Нет ожидающих проверки платежей",
-            reply_markup=AdminKeyboard.admin_menu()
-        )
-        await callback.answer()
-        return
-    
-    payments_text = f"💰 <b>Ожидающие проверки платежи ({len(pending_payments)}):</b>\n\n"
-    
-    for i, row in enumerate(pending_payments[:5], 1):
-        payment, user, plan = row
-        
-        payments_text += (
-            f"{i}. ID: {payment.id}\n"
-            f"👤 Пользователь: {user.full_name} (@{user.username})\n"
-            f"💰 Сумма: {payment.amount}₽\n"
-            f"📋 Тариф: {plan.name}\n"
-            f"📅 Дата: {payment.created_at.strftime('%d.%m.%Y %H:%M')}\n\n"
-        )
-    
-    await callback.message.edit_text(
-        payments_text,
-        reply_markup=AdminKeyboard.admin_menu(), parse_mode='HTML'
-    )
-    await callback.answer()
-
 @router.callback_query(F.data == "admin:manage_tariffs")
 async def manage_tariffs(callback: CallbackQuery):
-    # Проверяем, является ли пользователь администратором
+    # Проверяем, является ли пользователь администратором и включена ли функция управления тарифами
     if callback.from_user.id not in config.telegram.admin_ids:
         await callback.answer("У вас нет доступа к этой функции", show_alert=True)
+        return
+    
+    if not config.admin.manage_tariffs_enabled:
+        await callback.answer("Функция управления тарифами отключена", show_alert=True)
         return
     
     # Получаем все тарифные планы
@@ -199,6 +175,44 @@ async def manage_tariffs(callback: CallbackQuery):
     await callback.message.edit_text(
         tariffs_text,
         reply_markup=AdminKeyboard.manage_tariffs_menu(), parse_mode='HTML'
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "admin:manage_channels")
+async def manage_channels(callback: CallbackQuery):
+    # Проверяем, является ли пользователь администратором и включена ли функция управления каналами
+    if callback.from_user.id not in config.telegram.admin_ids:
+        await callback.answer("У вас нет доступа к этой функции", show_alert=True)
+        return
+    
+    if not config.admin.manage_channels_enabled or not config.channels.multi_channel_mode:
+        await callback.answer("Функция управления каналами отключена или бот не настроен на мультиканальный режим", show_alert=True)
+        return
+    
+    # Получаем все каналы с привязанными тарифами
+    channels_with_plans = await ChannelDAL.get_channels_with_plans()
+    
+    channels_text = f"📝 <b>Управление каналами доступа</b>\n\n"
+    
+    if not channels_with_plans:
+        channels_text += "Каналы не найдены. Добавьте первый канал."
+    else:
+        for i, (channel, plans) in enumerate(channels_with_plans, 1):
+            # Формируем список тарифов для канала
+            plan_names = [plan.name for plan in plans]
+            plans_text = ", ".join(plan_names) if plan_names else "Нет тарифов"
+            
+            channels_text += (
+                f"{i}. <b>{channel.name}</b>\n"
+                f"   ID: {channel.channel_id}\n"
+                f"   Активен: {'✅' if channel.is_active else '❌'}\n"
+                f"   Тарифы: {plans_text}\n\n"
+            )
+    
+    await callback.message.edit_text(
+        channels_text,
+        reply_markup=AdminKeyboard.manage_channels_menu(),
+        parse_mode='HTML'
     )
     await callback.answer()
 

@@ -89,7 +89,20 @@ class Subscription(Base):
     user = relationship("User", back_populates="subscriptions")
     plan = relationship("TariffPlan")
 
-# Обновление модели TariffPlan для работы с несколькими валютами
+class Channel(Base):
+    """Channel access configuration"""
+    __tablename__ = "channels"
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)  # Channel name
+    channel_id = Column(BigInteger, nullable=False)  # Telegram channel ID
+    invite_link = Column(String, nullable=False)  # Invite link to the channel
+    is_active = Column(Boolean, default=True)  # Is the channel active
+    display_order = Column(Integer, default=0)  # Order in the channels list
+    
+    # Relationships
+    tariff_plans = relationship("TariffPlan", back_populates="channel")  # Прямая связь с тарифами этого канала
+
 class TariffPlan(Base):
     __tablename__ = "tariff_plans"
     
@@ -98,12 +111,14 @@ class TariffPlan(Base):
     code = Column(String, nullable=False, unique=True)  # Код тарифа (например, "1_month")
     price = Column(Float, nullable=False)  # Базовая цена в рублях (для обратной совместимости)
     duration_days = Column(Integer, nullable=False)  # Длительность подписки в днях
+    channel_id = Column(Integer, ForeignKey("channels.id"), nullable=False)  # Прямая связь с каналом
     is_active = Column(Boolean, default=True)  # Активен ли тариф
     display_order = Column(Integer, default=0)  # Порядок отображения в меню
     created_at = Column(DateTime, server_default=func.now())
     
     # Relationships
     prices = relationship("TariffPrice", back_populates="tariff")
+    channel = relationship("Channel", back_populates="tariff_plans")  # Обратная связь с каналом
 
 # Модель для хранения цен в разных валютах
 class TariffPrice(Base):
@@ -143,29 +158,3 @@ class Payment(Base):
     plan = relationship("TariffPlan")
     currency = relationship("Currency")
     payment_method = relationship("PaymentMethod")  # Связь с моделью PaymentMethod
-
-class Channel(Base):
-    """Channel access configuration"""
-    __tablename__ = "channels"
-    
-    id = Column(Integer, primary_key=True)
-    name = Column(String, nullable=False)  # Channel name
-    channel_id = Column(BigInteger, nullable=False)  # Telegram channel ID
-    invite_link = Column(String, nullable=False)  # Invite link to the channel
-    is_active = Column(Boolean, default=True)  # Is the channel active
-    display_order = Column(Integer, default=0)  # Order in the channels list
-    
-    # Relationships
-    access_plans = relationship("ChannelAccessPlan", back_populates="channel")
-
-class ChannelAccessPlan(Base):
-    """Mapping between channels and tariff plans"""
-    __tablename__ = "channel_access_plans"
-    
-    id = Column(Integer, primary_key=True)
-    channel_id = Column(Integer, ForeignKey("channels.id"), nullable=False)
-    plan_id = Column(Integer, ForeignKey("tariff_plans.id"), nullable=False)
-    
-    # Relationships
-    channel = relationship("Channel", back_populates="access_plans")
-    plan = relationship("TariffPlan")

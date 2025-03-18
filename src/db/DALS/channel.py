@@ -1,10 +1,6 @@
-"""
-Data Access Layer для работы с каналами доступа.
-"""
-
 from sqlalchemy import select, update, and_, desc, func, delete
 from src.db.database import get_db
-from src.db.models import Channel, ChannelAccessPlan, TariffPlan
+from src.db.models import Channel, TariffPlan, User, Subscription
 from typing import List, Optional, Dict, Any, Tuple
 
 
@@ -235,43 +231,55 @@ class ChannelDAL:
         Returns:
             True если канал удален, False в противном случае
         """
-        # Сначала удаляем связи с тарифными планами
-        delete_access_query = delete(ChannelAccessPlan).where(ChannelAccessPlan.channel_id == channel_id)
-        await ChannelDAL.db.execute(delete_access_query)
+        # Сначала получаем все тарифы, относящиеся к каналу
+        tariffs_query = select(TariffPlan).where(TariffPlan.channel_id == channel_id)
+        tariffs_result = await ChannelDAL.db.fetch(tariffs_query)
+        tariff_ids = [row[0].id for row in tariffs_result]
         
-        # Затем удаляем сам канал
-        delete_query = delete(Channel).where(Channel.id == channel_id).returning(Channel.id)
-        result = await ChannelDAL.db.fetchval(delete_query)
-        return result is not None
-    
-    @staticmethod
-    async def get_channels_by_plan(plan_id: int) -> List[Channel]:
-        """
-        Получить каналы, доступные по тарифному плану
+        # Проверяем наличие активных подписок на тарифы этого канала
+        has_active_subscriptions = False
+        for tariff_id in tariff_ids:
+            subs_query = select(Subscription).where(
+                and_(
+                    Subscription.plan_id == tariff_id,
+                    Subscription.is_active == True
+                )
+            )
+            result = await ChannelDAL.db.fetchrow(subs_query)
+            if result:
+                has_active_subscriptions = True
+                break
         
-        Args:
-            plan_id: ID тарифного плана
+        if has_active_subscriptions:
+            # Если есть активные подписки, просто деактивируем канал
+            update_query = (
+                update(Channel)
+                .where(Channel.id == channel_id)
+                .values(is_active=False)
+                .returning(Channel.id)
+            )
+            result = await ChannelDAL.db.fetchval(update_query)
+            return result is not None
+        else:
+            # Если нет активных подписок, можно удалить канал
+            # и деактивировать связанные тарифы
+            for tariff_id in tariff_ids:
+                update_tariff_query = (
+                    update(TariffPlan)
+                    .where(TariffPlan.id == tariff_id)
+                    .values(is_active=False)
+                )
+                await ChannelDAL.db.execute(update_tariff_query)
             
-        Returns:
-            Список каналов, доступных по данному тарифному плану
-        """
-        query = (
-            select(Channel)
-            .join(ChannelAccessPlan, Channel.id == ChannelAccessPlan.channel_id)
-            .where(and_(
-                ChannelAccessPlan.plan_id == plan_id,
-                Channel.is_active == True
-            ))
-            .order_by(Channel.display_order)
-        )
-        
-        result = await ChannelDAL.db.fetch(query)
-        return [row[0] for row in result]
+            # Затем удаляем сам канал
+            delete_query = delete(Channel).where(Channel.id == channel_id).returning(Channel.id)
+            result = await ChannelDAL.db.fetchval(delete_query)
+            return result is not None
     
     @staticmethod
-    async def get_channels_with_plans() -> List[Tuple[Channel, List[TariffPlan]]]:
+    async def get_channels_with_tariffs() -> List[Tuple[Channel, List[TariffPlan]]]:
         """
-        Получить все каналы с привязанными к ним тарифными планами
+        Получить все каналы с их тарифными планами
         
         Returns:
             Список кортежей (канал, список тарифных планов)
@@ -281,143 +289,74 @@ class ChannelDAL:
         result = []
         
         for channel in channels:
-            # Получаем тарифные планы для канала
-            plans_query = (
+            # Получаем тарифные планы для канала напрямую
+            tariffs_query = (
                 select(TariffPlan)
-                .join(ChannelAccessPlan, TariffPlan.id == ChannelAccessPlan.plan_id)
-                .where(ChannelAccessPlan.channel_id == channel.id)
+                .where(and_(
+                    TariffPlan.channel_id == channel.id,
+                    TariffPlan.is_active == True
+                ))
                 .order_by(TariffPlan.display_order)
             )
             
-            plans_result = await ChannelDAL.db.fetch(plans_query)
-            plans = [row[0] for row in plans_result]
+            tariffs_result = await ChannelDAL.db.fetch(tariffs_query)
+            tariffs = [row[0] for row in tariffs_result]
             
-            result.append((channel, plans))
+            result.append((channel, tariffs))
         
         return result
     
     @staticmethod
-    async def add_plan_to_channel(channel_id: int, plan_id: int) -> Optional[ChannelAccessPlan]:
+    async def check_user_has_access_to_channel(telegram_user_id: int, channel_id: int) -> bool:
         """
-        Добавить тарифный план к каналу
+        Проверяет, имеет ли пользователь доступ к указанному каналу
         
         Args:
-            channel_id: ID канала
-            plan_id: ID тарифного плана
-            
-        Returns:
-            Созданный объект доступа или None в случае ошибки
-        """
-        # Проверяем, существует ли уже такая связь
-        query = (
-            select(ChannelAccessPlan)
-            .where(and_(
-                ChannelAccessPlan.channel_id == channel_id,
-                ChannelAccessPlan.plan_id == plan_id
-            ))
-        )
-        
-        existing = await ChannelDAL.db.fetchrow(query)
-        if existing:
-            return existing[0]
-        
-        # Создаем новую связь
-        async with ChannelDAL.db.session() as session:
-            access_plan = ChannelAccessPlan(
-                channel_id=channel_id,
-                plan_id=plan_id
-            )
-            session.add(access_plan)
-            await session.commit()
-            await session.refresh(access_plan)
-            return access_plan
-    
-    @staticmethod
-    async def remove_plan_from_channel(channel_id: int, plan_id: int) -> bool:
-        """
-        Удалить тарифный план из канала
-        
-        Args:
-            channel_id: ID канала
-            plan_id: ID тарифного плана
-            
-        Returns:
-            True если связь удалена, False в противном случае
-        """
-        query = delete(ChannelAccessPlan).where(
-            and_(
-                ChannelAccessPlan.channel_id == channel_id,
-                ChannelAccessPlan.plan_id == plan_id
-            )
-        ).returning(ChannelAccessPlan.id)
-        
-        result = await ChannelDAL.db.fetchval(query)
-        return result is not None
-    
-    @staticmethod
-    async def get_plans_for_channel(channel_id: int) -> List[TariffPlan]:
-        """
-        Получить все тарифные планы, связанные с каналом
-        
-        Args:
-            channel_id: ID канала
-            
-        Returns:
-            Список тарифных планов
-        """
-        query = (
-            select(TariffPlan)
-            .join(ChannelAccessPlan, TariffPlan.id == ChannelAccessPlan.plan_id)
-            .where(ChannelAccessPlan.channel_id == channel_id)
-            .order_by(TariffPlan.display_order)
-        )
-        
-        result = await ChannelDAL.db.fetch(query)
-        return [row[0] for row in result]
-    
-    @staticmethod
-    async def update_channel_plans(channel_id: int, plan_ids: List[int]) -> bool:
-        """
-        Обновить список тарифных планов для канала
-        
-        Args:
-            channel_id: ID канала
-            plan_ids: Список ID тарифных планов
-            
-        Returns:
-            True если обновление успешно, False в противном случае
-        """
-        try:
-            delete_query = delete(ChannelAccessPlan).where(ChannelAccessPlan.channel_id == channel_id)
-            await ChannelDAL.db.execute(delete_query)
-
-            for plan_id in plan_ids:
-                await ChannelDAL.add_plan_to_channel(channel_id, plan_id)
-                
-            return True
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).error(f"Ошибка при обновлении планов для канала {channel_id}: {e}")
-            return False
-        
-    @staticmethod
-    async def check_plan_has_access_to_channel(plan_id: int, channel_id: int) -> bool:
-        """
-        Проверяет, имеет ли тарифный план доступ к указанному каналу
-        
-        Args:
-            plan_id: ID тарифного плана
+            telegram_user_id: ID пользователя в Telegram
             channel_id: ID канала в базе данных
             
         Returns:
-            True если тарифный план имеет доступ к каналу, False в противном случае
+            True если пользователь имеет доступ к каналу, False в противном случае
         """
-        query = select(ChannelAccessPlan).where(
-            and_(
-                ChannelAccessPlan.plan_id == plan_id,
-                ChannelAccessPlan.channel_id == channel_id
-            )
+        # Получаем активную подписку пользователя для данного канала
+        query = (
+            select(Subscription)
+            .join(User, Subscription.user_id == User.id)
+            .join(TariffPlan, Subscription.plan_id == TariffPlan.id)
+            .where(and_(
+                User.user_id == telegram_user_id,
+                Subscription.is_active == True,
+                TariffPlan.channel_id == channel_id
+            ))
         )
         
         result = await ChannelDAL.db.fetchrow(query)
         return result is not None
+    
+    @staticmethod
+    async def get_user_available_channels(telegram_user_id: int) -> List[Channel]:
+        """
+        Получает список каналов, к которым пользователь имеет доступ согласно его подпискам
+        
+        Args:
+            telegram_user_id: ID пользователя в Telegram
+            
+        Returns:
+            Список каналов, к которым пользователь имеет доступ
+        """
+        # Получаем каналы, связанные с активными подписками пользователя
+        query = (
+            select(Channel)
+            .join(TariffPlan, Channel.id == TariffPlan.channel_id)
+            .join(Subscription, TariffPlan.id == Subscription.plan_id)
+            .join(User, Subscription.user_id == User.id)
+            .where(and_(
+                User.user_id == telegram_user_id,
+                Subscription.is_active == True,
+                Channel.is_active == True
+            ))
+            .order_by(Channel.display_order)
+        )
+        
+        result = await ChannelDAL.db.fetch(query)
+        return [row[0] for row in result]

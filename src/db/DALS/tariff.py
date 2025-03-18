@@ -60,6 +60,29 @@ class TariffDAL:
         return [row[0] for row in result]
     
     @staticmethod
+    async def get_tariffs_by_channel(channel_id: int) -> List[TariffPlan]:
+        """
+        Получить все тарифные планы для конкретного канала
+        
+        Args:
+            channel_id: ID канала
+            
+        Returns:
+            Список тарифных планов для канала
+        """
+        query = (
+            select(TariffPlan)
+            .where(and_(
+                TariffPlan.channel_id == channel_id,
+                TariffPlan.is_active == True
+            ))
+            .order_by(TariffPlan.display_order)
+        )
+        
+        result = await TariffDAL.db.fetch(query)
+        return [row[0] for row in result]
+    
+    @staticmethod
     async def toggle_active(tariff_id: int) -> Optional[TariffPlan]:
         """
         Переключить статус активности тарифного плана
@@ -112,26 +135,35 @@ class TariffDAL:
         return result[0] if result else None
     
     @staticmethod
-    async def initialize_default_plans(default_plans: List[Dict[str, Any]]) -> List[TariffPlan]:
+    async def initialize_default_plans(default_plans: List[Dict[str, Any]], default_channel_id: int = None) -> List[TariffPlan]:
         """
         Инициализировать стандартные тарифные планы
         
         Args:
             default_plans: Список конфигураций тарифных планов по умолчанию
+            default_channel_id: ID канала по умолчанию для всех планов
             
         Returns:
             Список тарифных планов
         """
         result = []
         
+        # Если не указан канал по умолчанию, создавать планы нельзя
+        if default_channel_id is None:
+            return result
+        
         for plan_data in default_plans:
+            # Добавляем channel_id к данным плана
+            plan_data_with_channel = plan_data.copy()
+            plan_data_with_channel["channel_id"] = default_channel_id
+            
             # Проверяем, существует ли план с таким кодом
             plan = await TariffDAL.get_by_code(plan_data["code"])
             
             if plan is None:
                 # Создаем новый тарифный план
                 async with TariffDAL.db.session() as session:
-                    plan = TariffPlan(**plan_data)
+                    plan = TariffPlan(**plan_data_with_channel)
                     session.add(plan)
                     await session.commit()
                     await session.refresh(plan)
@@ -140,7 +172,7 @@ class TariffDAL:
                 need_update = False
                 update_data = {}
                 
-                for key, value in plan_data.items():
+                for key, value in plan_data_with_channel.items():
                     if hasattr(plan, key) and getattr(plan, key) != value:
                         update_data[key] = value
                         need_update = True
@@ -162,14 +194,21 @@ class TariffDAL:
         return result
     
     @staticmethod
-    async def get_max_display_order() -> int:
+    async def get_max_display_order(channel_id: int = None) -> int:
         """
         Получить максимальный порядок отображения
         
+        Args:
+            channel_id: ID канала (если указан, то максимальный порядок среди тарифов канала)
+            
         Returns:
             Максимальный порядок отображения
         """
-        query = select(func.max(TariffPlan.display_order))
+        if channel_id is not None:
+            query = select(func.max(TariffPlan.display_order)).where(TariffPlan.channel_id == channel_id)
+        else:
+            query = select(func.max(TariffPlan.display_order))
+            
         return await TariffDAL.db.fetchval(query) or 0
     
     @staticmethod
@@ -177,22 +216,24 @@ class TariffDAL:
         name: str, 
         code: str, 
         price: float, 
-        duration_days: int
+        duration_days: int,
+        channel_id: int  # Теперь это обязательный параметр
     ) -> TariffPlan:
         """
-        Создать новый тарифный план
+        Создать новый тарифный план для конкретного канала
         
         Args:
             name: Название тарифного плана
             code: Код тарифного плана
             price: Стоимость тарифного плана
             duration_days: Длительность тарифного плана в днях
+            channel_id: ID канала, к которому даёт доступ тариф
             
         Returns:
             Созданный тарифный план
         """
-        # Получаем максимальный порядок отображения
-        max_order = await TariffDAL.get_max_display_order()
+        # Получаем максимальный порядок отображения для тарифов этого канала
+        max_order = await TariffDAL.get_max_display_order(channel_id) + 1
         
         # Создаем новый тарифный план
         async with TariffDAL.db.session() as session:
@@ -201,8 +242,9 @@ class TariffDAL:
                 code=code,
                 price=price,
                 duration_days=duration_days,
+                channel_id=channel_id,
                 is_active=True,
-                display_order=max_order + 1
+                display_order=max_order
             )
             session.add(plan)
             await session.commit()

@@ -5,7 +5,6 @@ from datetime import datetime
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
 
-from payments import youkassa
 from src.db.models import TariffPlan
 from src.keyboards.inline import SubscriptionKeyboard
 from src.keyboards.reply import MainKeyboard
@@ -14,6 +13,7 @@ from src.utils.channel_access import get_user_channel_invites, check_and_invite_
 from src.db.DALS.user import UserDAL
 from src.db.DALS.subscription import SubscriptionDAL
 from src.db.DALS.tariff import TariffDAL
+from src.db.DALS.channel import ChannelDAL
 from src.db.DALS.payment import PaymentDAL
 from src.db.DALS.payment_method import PaymentMethodDAL
 from src.db.DALS.currency import CurrencyDAL
@@ -25,8 +25,6 @@ from src.payments.stars import process_stars_payment
 from src.keyboards.inline import AdminKeyboard
 from src.config import config
 
-from src.payments import tinkoff, cryptobot
-
 import logging
 
 router = Router()
@@ -34,29 +32,107 @@ logger = logging.getLogger(__name__)
 
 
 @router.message(F.text == "💼 Тарифы")
-async def show_plans(message: Message):
-    tariff_plans = await TariffDAL.get_active_plans()
+async def show_channels_for_subscription(message: Message):
+    """Показывает список каналов для выбора подписки"""
+    # Получаем активные каналы
+    channels = await ChannelDAL.get_active_channels()
+    
+    if not channels:
+        await message.answer("В данный момент нет доступных каналов для подписки.")
+        return
+    
+    text = "📺 <b>Выберите канал для подписки:</b>\n\n"
+    
+    # Создаем клавиатуру с каналами
+    builder = InlineKeyboardBuilder()
+    
+    for channel in channels:
+        builder.add(InlineKeyboardButton(
+            text=channel.name,
+            callback_data=f"select_channel:{channel.id}"
+        ))
+    
+    builder.adjust(1)
+    
+    await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
-    plans_text = "📋 Выберите подходящий тарифный план:\n\n"
 
-    for plan in tariff_plans:
+@router.callback_query(F.data.startswith("select_channel:"))
+async def show_channel_tariffs(callback: CallbackQuery):
+    """Показывает тарифы для выбранного канала"""
+    channel_id = int(callback.data.split(":")[1])
+    
+    # Получаем информацию о канале
+    channel = await ChannelDAL.get_by_id(channel_id)
+    
+    if not channel:
+        await callback.answer("Канал не найден", show_alert=True)
+        return
+    
+    # Получаем тарифные планы для канала
+    tariffs = await TariffDAL.get_tariffs_by_channel(channel_id)
+    
+    if not tariffs:
+        await callback.answer("Для этого канала нет доступных тарифов", show_alert=True)
+        await callback.message.edit_text(
+            "⚠️ Для выбранного канала нет доступных тарифов. Выберите другой канал.",
+            reply_markup=InlineKeyboardBuilder().add(
+                InlineKeyboardButton(text="◀️ Назад к каналам", callback_data="back_to_channels")
+            ).as_markup()
+        )
+        return
+    
+    plans_text = f"📋 <b>Тарифы для канала {channel.name}</b>\n\n"
+    
+    for plan in tariffs:
         plans_text += f"<b>{plan.name}</b> - {plan.price}₽\n"
-
-    await message.answer(plans_text, reply_markup=SubscriptionKeyboard.plans(tariff_plans), parse_mode="HTML")
-
-
-@router.callback_query(F.data == "back_to_tariffs")
-async def back_to_tariffs(callback: CallbackQuery):
-    tariff_plans = await TariffDAL.get_active_plans()
-
-    plans_text = "📋 Выберите подходящий тарифный план:\n\n"
-
-    for plan in tariff_plans:
-        plans_text += f"<b>{plan.name}</b> - {plan.price}₽\n"
-
+    
+    plans_text += "\nВыберите подходящий тарифный план:"
+    
+    # Создаем клавиатуру с тарифами
+    builder = InlineKeyboardBuilder()
+    
+    for plan in tariffs:
+        builder.add(InlineKeyboardButton(
+            text=f"{plan.name} - {plan.price}₽",
+            callback_data=f"plan:{plan.id}"
+        ))
+    
+    builder.add(InlineKeyboardButton(
+        text="◀️ Назад к каналам",
+        callback_data="back_to_channels"
+    ))
+    
+    builder.adjust(1)
+    
     await callback.message.edit_text(
-        plans_text, reply_markup=SubscriptionKeyboard.plans(tariff_plans), parse_mode="HTML"
+        plans_text, 
+        reply_markup=builder.as_markup(), 
+        parse_mode="HTML"
     )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "back_to_channels")
+async def back_to_channels_list(callback: CallbackQuery):
+    """Возврат к списку каналов"""
+    # Получаем активные каналы
+    channels = await ChannelDAL.get_active_channels()
+    
+    text = "📺 <b>Выберите канал для подписки:</b>\n\n"
+    
+    # Создаем клавиатуру с каналами
+    builder = InlineKeyboardBuilder()
+    
+    for channel in channels:
+        builder.add(InlineKeyboardButton(
+            text=channel.name,
+            callback_data=f"select_channel:{channel.id}"
+        ))
+    
+    builder.adjust(1)
+    
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
     await callback.answer()
 
 
@@ -68,6 +144,12 @@ async def process_plan_selection(callback: CallbackQuery, state: FSMContext):
 
     if not plan:
         await callback.answer("Тарифный план не найден", show_alert=True)
+        return
+
+    # Получаем канал, к которому привязан тариф
+    channel = await ChannelDAL.get_by_id(plan.channel_id)
+    if not channel:
+        await callback.answer("Ошибка: канал для тарифа не найден", show_alert=True)
         return
 
     payment_methods = await PaymentMethodDAL.get_active_methods()
@@ -82,6 +164,8 @@ async def process_plan_selection(callback: CallbackQuery, state: FSMContext):
             enabled_methods.append(method)
         elif method.code == "cryptobot" and config.payment.cryptobot_enabled:
             enabled_methods.append(method)
+        elif method.code == "stars" and config.payment.stars_enabled:
+            enabled_methods.append(method)
 
     if not enabled_methods:
         await callback.answer("В данный момент оплата недоступна. Попробуйте позже.", show_alert=True)
@@ -92,7 +176,7 @@ async def process_plan_selection(callback: CallbackQuery, state: FSMContext):
 
     if len(enabled_methods) > 1:
         methods_text = (
-            f"Вы выбрали тариф: <b>{plan.name}</b>\n\n"
+            f"Вы выбрали тариф: <b>{plan.name}</b> для канала <b>{channel.name}</b>\n\n"
             f"Сумма к оплате: <b>{plan.price}₽</b>\n\n"
             f"Выберите способ оплаты:"
         )
@@ -132,6 +216,13 @@ async def process_payment_method(callback: CallbackQuery, state: FSMContext, met
         await state.clear()
         return
 
+    # Получаем канал, к которому привязан тариф
+    channel = await ChannelDAL.get_by_id(plan.channel_id)
+    if not channel:
+        await callback.answer("Ошибка: канал для тарифа не найден", show_alert=True)
+        await state.clear()
+        return
+
     payment_method = await PaymentMethodDAL.get_by_code(method_code)
 
     if not payment_method:
@@ -149,13 +240,13 @@ async def process_payment_method(callback: CallbackQuery, state: FSMContext, met
     final_price = await PaymentMethodDAL.calculate_price_with_method(plan.price, payment_method.id)
 
     if method_code == "manual":
-        await process_manual_payment(callback, state, plan, payment_method, default_currency, final_price)
+        await process_manual_payment(callback, state, plan, channel, payment_method, default_currency, final_price)
     elif method_code == "youkassa":
-        await yookassa_payment_route(callback, state, plan, payment_method, default_currency, final_price)
+        await yookassa_payment_route(callback, plan, default_currency, final_price)
     elif method_code == "tinkoff":
-        await tinkoff_payment_route(callback, state, plan, payment_method, default_currency, final_price)
+        await tinkoff_payment_route(callback, plan, default_currency, final_price)
     elif method_code == "cryptobot":
-        await cryptobot_payment_route(callback, state, plan, payment_method, default_currency, final_price)
+        await cryptobot_payment_route(callback, plan, default_currency, final_price)
     elif method_code == "stars":
         await process_stars_payment(callback, state)
 
@@ -163,12 +254,18 @@ async def process_payment_method(callback: CallbackQuery, state: FSMContext, met
 
 
 async def process_manual_payment(
-    callback: CallbackQuery, state: FSMContext, plan: TariffPlan, payment_method, currency, final_price
+    callback: CallbackQuery, 
+    state: FSMContext, 
+    plan: TariffPlan, 
+    channel, 
+    payment_method, 
+    currency, 
+    final_price
 ):
     await state.set_state(PaymentStates.waiting_for_payment_screenshot)
 
     payment_text = (
-        f"Вы выбрали тариф: <b>{plan.name}</b>\n\n"
+        f"Вы выбрали тариф: <b>{plan.name}</b> для канала <b>{channel.name}</b>\n\n"
         f"Сумма к оплате: <b>{final_price} {currency.symbol}</b>\n\n"
         f"Для оплаты переведите указанную сумму на следующие реквизиты:\n"
         f"💳 <b>Номер карты:</b> {config.payment.manual_card_number}\n"
@@ -192,7 +289,7 @@ async def cancel_payment_process(callback: CallbackQuery, state: FSMContext):
 
     await state.clear()
 
-    await back_to_tariffs(callback)
+    await back_to_channels_list(callback)
 
 
 @router.message(PaymentStates.waiting_for_payment_screenshot, F.photo)
@@ -214,6 +311,13 @@ async def process_payment_screenshot(message: Message, state: FSMContext):
 
     if not plan:
         await message.answer("Ошибка: тарифный план не найден")
+        await state.clear()
+        return
+
+    # Получаем канал, к которому привязан тариф
+    channel = await ChannelDAL.get_by_id(plan.channel_id)
+    if not channel:
+        await message.answer("Ошибка: канал для тарифа не найден")
         await state.clear()
         return
 
@@ -249,9 +353,7 @@ async def process_payment_screenshot(message: Message, state: FSMContext):
         reply_markup=MainKeyboard.main_menu(),
     )
 
-
     try:
-
         await message.bot.send_photo(
             chat_id=config.payment.manual_channel_id,
             photo=file_id,
@@ -260,6 +362,7 @@ async def process_payment_screenshot(message: Message, state: FSMContext):
                 f"👤 Пользователь: {message.from_user.full_name} (@{message.from_user.username})\n"
                 f"💰 Сумма: {final_price} {currency.symbol}\n"
                 f"📋 Тариф: {plan.name}\n"
+                f"📺 Канал: {channel.name}\n"
                 f"💳 Способ оплаты: {payment_method.name}\n"
                 f"🆔 ID платежа: {payment.id}"
             ),
@@ -278,20 +381,15 @@ async def show_subscriptions(message: Message):
         full_name=f"{message.from_user.first_name} {message.from_user.last_name or ''}",
     )
 
-    subscription_data = await SubscriptionDAL.get_by_telegram_id(message.from_user.id)
+    # Получаем доступные пользователю каналы
+    available_channels = await ChannelDAL.get_user_available_channels(message.from_user.id)
 
-    if subscription_data:
-        subscription, plan, _ = subscription_data
-
+    if available_channels:
         subscribed_channels, need_to_subscribe_channels = await check_and_invite_to_channels(
             message.bot, message.from_user.id
         )
 
-        subscription_text = (
-            f"📺 <b>Ваша подписка</b>\n\n"
-            f"📅 Тариф: {plan.name}\n"
-            f"⏱ Действует до: {subscription.end_date.strftime('%d.%m.%Y')}\n\n"
-        )
+        subscription_text = f"📺 <b>Ваши подписки</b>\n\n"
 
         if subscribed_channels or need_to_subscribe_channels:
             subscription_text += f"📺 <b>Доступные каналы:</b>\n"
@@ -326,8 +424,8 @@ async def show_subscriptions(message: Message):
             )
     else:
         subscription_text = (
-            f"📺 <b>У вас нет активной подписки</b>\n\n"
-            f"Нажмите на кнопку '💼 Тарифы', чтобы выбрать подходящий тариф"
+            f"📺 <b>У вас нет активных подписок</b>\n\n"
+            f"Нажмите на кнопку '💼 Тарифы', чтобы выбрать канал и подходящий тариф"
         )
 
         await message.answer(subscription_text, parse_mode="HTML")
@@ -366,24 +464,14 @@ async def update_channel_subscriptions(callback: CallbackQuery):
 @router.message(F.text == "ℹ️ Информация")
 async def show_info(message: Message):
     info_text = (
-        (
-            "ℹ️ <b>О боте</b>\n\n"
-            "Этот бот позволяет оформить подписку на наши каналы.\n\n"
-            "📋 <b>Доступные команды:</b>\n"
-            "/start - Запустить бота\n"
-            "💼 Тарифы - Просмотр доступных тарифов\n"
-            "📺 Подписки - Информация о ваших подписках\n\n"
-        )
-        if config.channels.multi_channel_mode
-        else (
-            "ℹ️ <b>О боте</b>\n\n"
-            "Этот бот позволяет оформить подписку на наш канал.\n\n"
-            "📋 <b>Доступные команды:</b>\n"
-            "/start - Запустить бота\n"
-            "💼 Тарифы - Просмотр доступных тарифов\n"
-            "📺 Подписка - Информация о вашей подписке\n\n"
-        )
+        "ℹ️ <b>О боте</b>\n\n"
+        "Этот бот позволяет оформить подписку на наши каналы.\n\n"
+        "📋 <b>Доступные команды:</b>\n"
+        "/start - Запустить бота\n"
+        "💼 Тарифы - Просмотр доступных каналов и тарифов\n"
+        "📺 Подписки - Информация о ваших подписках\n\n"
     )
+    
     available_methods = []
     if config.payment.manual_payment_enabled:
         available_methods.append("💳 Банковская карта (ручная оплата)")
@@ -393,6 +481,8 @@ async def show_info(message: Message):
         available_methods.append("🏦 Tinkoff")
     if config.payment.cryptobot_enabled:
         available_methods.append("💎 CryptoBot (криптовалюта)")
+    if config.payment.stars_enabled:
+        available_methods.append("⭐ Telegram Stars")
 
     if available_methods:
         info_text += "<b>Доступные способы оплаты:</b>\n"

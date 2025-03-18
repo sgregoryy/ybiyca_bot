@@ -35,6 +35,17 @@ class TelegramConfig:
 
 
 @dataclass
+class AdminConfig:
+    """Admin panel configuration"""
+    # Base features (always enabled)
+    # statistics and broadcast are always enabled
+    
+    # Optional features
+    manage_tariffs_enabled: bool = True
+    manage_channels_enabled: bool = True
+
+
+@dataclass
 class PaymentConfig:
     """Payment system settings"""
     # Manual payment settings
@@ -97,6 +108,7 @@ class Config:
     """Main application configuration"""
     db: DatabaseConfig
     telegram: TelegramConfig
+    admin: AdminConfig  # Admin configuration
     payment: PaymentConfig
     tariff: TariffConfig
     localization: LocalizationConfig
@@ -121,6 +133,12 @@ def load_config(env_path: Optional[str] = None) -> Config:
             admin_ids = [int(id.strip()) for id in admin_ids_str.split(',')]
         except ValueError:
             logger.error("Invalid admin IDs format, should be comma-separated integers")
+
+    # Admin panel configuration
+    admin_config = AdminConfig(
+        manage_tariffs_enabled=os.getenv('ADMIN_MANAGE_TARIFFS', 'true').lower() in ('true', '1', 'yes'),
+        manage_channels_enabled=os.getenv('ADMIN_MANAGE_CHANNELS', 'true').lower() in ('true', '1', 'yes')
+    )
 
     payment_methods = []
     
@@ -194,6 +212,7 @@ def load_config(env_path: Optional[str] = None) -> Config:
             sponsor_channel_link=os.getenv('SPONSOR_CHANNEL_LINK', ''),
             require_subscription=os.getenv('REQUIRE_SUBSCRIPTION', 'true').lower() in ('true', '1', 'yes')
         ),
+        admin=admin_config,  # Admin configuration
         payment=PaymentConfig(
             manual_payment_enabled=manual_payment_enabled,
             manual_card_number=os.getenv('MANUAL_CARD_NUMBER', ''),
