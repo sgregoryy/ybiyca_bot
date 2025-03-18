@@ -1,7 +1,11 @@
+"""
+Data Access Layer для работы с платежами с поддержкой разных валют и способов оплаты
+"""
+
 from datetime import datetime
 from sqlalchemy import select, update, and_, func
 from src.db.database import get_db
-from src.db.models import Payment, User, TariffPlan
+from src.db.models import Payment, User, TariffPlan, Currency, PaymentMethod
 from typing import List, Optional, Tuple, Dict, Any
 
 
@@ -25,18 +29,81 @@ class PaymentDAL:
         return result[0] if result else None
     
     @staticmethod
-    async def get_pending_payments() -> List[Tuple[Payment, User, TariffPlan]]:
+    async def get_payment_with_details(payment_id: int) -> Optional[Tuple[Payment, User, TariffPlan, Currency, PaymentMethod]]:
         """
-        Получить ожидающие платежи с информацией о пользователе и тарифном плане
+        Получить платеж с информацией о пользователе, тарифном плане, валюте и способе оплаты
         
+        Args:
+            payment_id: ID платежа
+            
         Returns:
-            Список кортежей (платеж, пользователь, тарифный план)
+            Кортеж (платеж, пользователь, тарифный план, валюта, способ оплаты) или None если не найден
         """
         query = (
-            select(Payment, User, TariffPlan)
+            select(Payment, User, TariffPlan, Currency, PaymentMethod)
             .join(User, Payment.user_id == User.id)
             .join(TariffPlan, Payment.plan_id == TariffPlan.id)
+            .join(Currency, Payment.currency_id == Currency.id)
+            .join(PaymentMethod, Payment.payment_method_id == PaymentMethod.id)
+            .where(Payment.id == payment_id)
+        )
+        
+        result = await PaymentDAL.db.fetchrow(query)
+        return result if result else None
+    
+    @staticmethod
+    async def get_pending_payments() -> List[Tuple[Payment, User, TariffPlan, Currency, PaymentMethod]]:
+        """
+        Получить ожидающие платежи с информацией о пользователе, тарифном плане, валюте и способе оплаты
+        
+        Returns:
+            Список кортежей (платеж, пользователь, тарифный план, валюта, способ оплаты)
+        """
+        query = (
+            select(Payment, User, TariffPlan, Currency, PaymentMethod)
+            .join(User, Payment.user_id == User.id)
+            .join(TariffPlan, Payment.plan_id == TariffPlan.id)
+            .join(Currency, Payment.currency_id == Currency.id)
+            .join(PaymentMethod, Payment.payment_method_id == PaymentMethod.id)
             .where(Payment.status == "pending")
+            .order_by(Payment.created_at.desc())
+        )
+        
+        result = await PaymentDAL.db.fetch(query)
+        return result
+    
+    @staticmethod
+    async def get_pending_payments_by_user_and_method(
+        user_id: int, 
+        payment_method_id: int, 
+        currency_id: Optional[int] = None
+    ) -> List[Tuple[Payment, TariffPlan, Currency, PaymentMethod]]:
+        """
+        Получить ожидающие платежи пользователя по способу оплаты и валюте
+        
+        Args:
+            user_id: ID пользователя
+            payment_method_id: ID способа оплаты
+            currency_id: ID валюты (опционально)
+            
+        Returns:
+            Список кортежей (платеж, тарифный план, валюта, способ оплаты)
+        """
+        filters = [
+            Payment.user_id == user_id,
+            Payment.payment_method_id == payment_method_id,
+            Payment.status == "pending"
+        ]
+        
+        if currency_id is not None:
+            filters.append(Payment.currency_id == currency_id)
+        
+        query = (
+            select(Payment, TariffPlan, Currency, PaymentMethod)
+            .join(TariffPlan, Payment.plan_id == TariffPlan.id)
+            .join(Currency, Payment.currency_id == Currency.id)
+            .join(PaymentMethod, Payment.payment_method_id == PaymentMethod.id)
+            .where(and_(*filters))
             .order_by(Payment.created_at.desc())
         )
         
@@ -47,10 +114,12 @@ class PaymentDAL:
     async def create_payment(
         user_id: int, 
         plan_id: int, 
+        payment_method_id: int,
+        currency_id: int,
         amount: float,
-        payment_method: str = "manual",
         screenshot_file_id: Optional[str] = None,
-        external_id: Optional[str] = None
+        external_id: Optional[str] = None,
+        status: str = "pending"
     ) -> Payment:
         """
         Создать новый платеж
@@ -58,10 +127,12 @@ class PaymentDAL:
         Args:
             user_id: ID пользователя в базе данных
             plan_id: ID тарифного плана
+            payment_method_id: ID способа оплаты
+            currency_id: ID валюты
             amount: Сумма платежа
-            payment_method: Метод оплаты
             screenshot_file_id: ID файла скриншота оплаты
             external_id: Внешний ID платежа
+            status: Статус платежа (по умолчанию "pending")
             
         Returns:
             Созданный платеж
@@ -70,11 +141,12 @@ class PaymentDAL:
             payment = Payment(
                 user_id=user_id,
                 plan_id=plan_id,
+                payment_method_id=payment_method_id,
+                currency_id=currency_id,
                 amount=amount,
-                payment_method=payment_method,
                 screenshot_file_id=screenshot_file_id,
                 external_id=external_id,
-                status="pending",
+                status=status,
                 created_at=datetime.now()
             )
             session.add(payment)
@@ -83,7 +155,32 @@ class PaymentDAL:
             return payment
     
     @staticmethod
-    async def approve_payment(payment_id: int) -> Optional[Tuple[Payment, User, TariffPlan]]:
+    async def update_payment(
+        payment_id: int,
+        **kwargs
+    ) -> Optional[Payment]:
+        """
+        Обновить платеж
+        
+        Args:
+            payment_id: ID платежа
+            **kwargs: Параметры для обновления
+            
+        Returns:
+            Обновленный платеж или None если не найден
+        """
+        query = (
+            update(Payment)
+            .where(Payment.id == payment_id)
+            .values(**kwargs)
+            .returning(Payment)
+        )
+        
+        result = await PaymentDAL.db.fetchrow(query)
+        return result[0] if result else None
+    
+    @staticmethod
+    async def approve_payment(payment_id: int) -> Optional[Tuple[Payment, User, TariffPlan, Currency, PaymentMethod]]:
         """
         Подтвердить платеж
         
@@ -91,21 +188,14 @@ class PaymentDAL:
             payment_id: ID платежа
             
         Returns:
-            Кортеж (обновленный платеж, пользователь, тарифный план) или None если платеж не найден
+            Кортеж (обновленный платеж, пользователь, тарифный план, валюта, способ оплаты) или None если платеж не найден
         """
-        # Получаем платеж с пользователем и тарифом
-        query = (
-            select(Payment, User, TariffPlan)
-            .join(User, Payment.user_id == User.id)
-            .join(TariffPlan, Payment.plan_id == TariffPlan.id)
-            .where(Payment.id == payment_id)
-        )
-        
-        result = await PaymentDAL.db.fetchrow(query)
+        # Получаем платеж с пользователем, тарифом, валютой и методом оплаты
+        result = await PaymentDAL.get_payment_with_details(payment_id)
         if not result:
             return None
         
-        payment, user, plan = result
+        payment, user, plan, currency, payment_method = result
         
         # Обновляем статус платежа
         update_query = (
@@ -124,13 +214,13 @@ class PaymentDAL:
             
         updated_payment = updated_result[0]
         
-        return (updated_payment, user, plan)
+        return (updated_payment, user, plan, currency, payment_method)
     
     @staticmethod
     async def reject_payment(
         payment_id: int, 
         reason: Optional[str] = None
-    ) -> Optional[Tuple[Payment, User, TariffPlan]]:
+    ) -> Optional[Tuple[Payment, User, TariffPlan, Currency, PaymentMethod]]:
         """
         Отклонить платеж
         
@@ -139,21 +229,14 @@ class PaymentDAL:
             reason: Причина отклонения
             
         Returns:
-            Кортеж (обновленный платеж, пользователь, тарифный план) или None если платеж не найден
+            Кортеж (обновленный платеж, пользователь, тарифный план, валюта, способ оплаты) или None если платеж не найден
         """
-        # Получаем платеж с пользователем и тарифом
-        query = (
-            select(Payment, User, TariffPlan)
-            .join(User, Payment.user_id == User.id)
-            .join(TariffPlan, Payment.plan_id == TariffPlan.id)
-            .where(Payment.id == payment_id)
-        )
-        
-        result = await PaymentDAL.db.fetchrow(query)
+        # Получаем платеж с пользователем, тарифом, валютой и методом оплаты
+        result = await PaymentDAL.get_payment_with_details(payment_id)
         if not result:
             return None
         
-        payment, user, plan = result
+        payment, user, plan, currency, payment_method = result
         
         # Обновляем статус платежа
         update_query = (
@@ -173,7 +256,31 @@ class PaymentDAL:
             
         updated_payment = updated_result[0]
         
-        return (updated_payment, user, plan)
+        return (updated_payment, user, plan, currency, payment_method)
+    
+    @staticmethod
+    async def cancel_payment(payment_id: int) -> bool:
+        """
+        Отменить платеж
+        
+        Args:
+            payment_id: ID платежа
+            
+        Returns:
+            True если платеж успешно отменен, False в противном случае
+        """
+        query = (
+            update(Payment)
+            .where(Payment.id == payment_id)
+            .values(
+                status="cancelled",
+                processed_at=datetime.now()
+            )
+            .returning(Payment.id)
+        )
+        
+        result = await PaymentDAL.db.fetchval(query)
+        return result is not None
     
     @staticmethod
     async def get_by_external_id(external_id: str) -> Optional[Payment]:
@@ -191,7 +298,7 @@ class PaymentDAL:
         return result[0] if result else None
     
     @staticmethod
-    async def get_user_payments(telegram_id: int) -> List[Tuple[Payment, TariffPlan]]:
+    async def get_user_payments(telegram_id: int) -> List[Tuple[Payment, TariffPlan, Currency, PaymentMethod]]:
         """
         Получить платежи пользователя по Telegram ID
         
@@ -199,12 +306,14 @@ class PaymentDAL:
             telegram_id: ID пользователя в Telegram
             
         Returns:
-            Список кортежей (платеж, тарифный план)
+            Список кортежей (платеж, тарифный план, валюта, способ оплаты)
         """
         query = (
-            select(Payment, TariffPlan)
+            select(Payment, TariffPlan, Currency, PaymentMethod)
             .join(User, Payment.user_id == User.id)
             .join(TariffPlan, Payment.plan_id == TariffPlan.id)
+            .join(Currency, Payment.currency_id == Currency.id)
+            .join(PaymentMethod, Payment.payment_method_id == PaymentMethod.id)
             .where(User.user_id == telegram_id)
             .order_by(Payment.created_at.desc())
         )
@@ -213,48 +322,68 @@ class PaymentDAL:
         return result
     
     @staticmethod
-    async def get_revenue_stats(start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> Dict[str, Any]:
+    async def get_revenue_stats() -> Dict[str, Any]:
         """
         Получить статистику доходов
         
-        Args:
-            start_date: Начальная дата (опционально)
-            end_date: Конечная дата (опционально)
-            
         Returns:
             Словарь со статистикой доходов
         """
         query = select(Payment).where(Payment.status == "approved")
         
-        if start_date:
-            query = query.where(Payment.processed_at >= start_date)
-        
-        if end_date:
-            query = query.where(Payment.processed_at <= end_date)
-        
         result = await PaymentDAL.db.fetch(query)
         payments = [row[0] for row in result]
         
-        # Считаем статистику
-        total_revenue = sum(payment.amount for payment in payments)
+        # Статистика по валютам
+        currency_stats = {}
+        for payment in payments:
+            currency_id = payment.currency_id
+            if currency_id in currency_stats:
+                currency_stats[currency_id] += payment.amount
+            else:
+                currency_stats[currency_id] = payment.amount
+        
+        # Получаем коды валют для статистики
+        currency_codes = {}
+        for currency_id in currency_stats.keys():
+            query = select(Currency.code).where(Currency.id == currency_id)
+            code = await PaymentDAL.db.fetchval(query)
+            if code:
+                currency_codes[currency_id] = code
+        
+        # Переформатируем статистику, используя коды валют
+        formatted_stats = {}
+        for currency_id, amount in currency_stats.items():
+            currency_code = currency_codes.get(currency_id, f"Unknown ({currency_id})")
+            formatted_stats[currency_code] = amount
+        
+        # Добавляем базовую статистику в рублях (если доступно)
+        rub_total = formatted_stats.get("RUB", 0)
+        
+        # Считаем количество платежей
+        payment_count = len(payments)
+        
+        # Средняя сумма в рублях (если доступно)
+        avg_payment_rub = rub_total / payment_count if payment_count and rub_total else 0
         
         # Группируем по методам оплаты
         payment_methods = {}
         for payment in payments:
-            method = payment.payment_method or "unknown"
-            if method in payment_methods:
-                payment_methods[method] += payment.amount
+            # Получаем код метода оплаты
+            method_query = select(PaymentMethod.code).where(PaymentMethod.id == payment.payment_method_id)
+            method_code = await PaymentDAL.db.fetchval(method_query) or "unknown"
+            
+            if method_code in payment_methods:
+                payment_methods[method_code] += 1
             else:
-                payment_methods[method] = payment.amount
-        
-        # Считаем среднюю сумму платежа
-        avg_payment = total_revenue / len(payments) if payments else 0
+                payment_methods[method_code] = 1
         
         return {
-            "total_revenue": total_revenue,
-            "payment_count": len(payments),
+            "total_by_currency": formatted_stats,
+            "total_rub": rub_total,
+            "payment_count": payment_count,
             "payment_methods": payment_methods,
-            "average_payment": avg_payment
+            "average_payment_rub": avg_payment_rub
         }
     
     @staticmethod

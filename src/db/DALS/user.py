@@ -1,11 +1,12 @@
 """
-Data Access Layer для работы с пользователями.
+Data Access Layer for working with users.
 """
 
 from datetime import datetime
 from sqlalchemy import select, update, and_, func
 from src.db.database import get_db
 from src.db.models import User
+from src.config import config
 from typing import List, Optional
 
 
@@ -16,43 +17,50 @@ class UserDAL:
     @staticmethod
     async def get_by_telegram_id(telegram_id: int) -> Optional[User]:
         """
-        Получить пользователя по Telegram ID
+        Get user by Telegram ID
         
         Args:
-            telegram_id: ID пользователя в Telegram
+            telegram_id: User's Telegram ID
             
         Returns:
-            Пользователь или None если не найден
+            User or None if not found
         """
         query = select(User).where(User.user_id == telegram_id)
         result = await UserDAL.db.fetchrow(query)
         return result[0] if result else None
     
     @staticmethod
-    async def get_or_create(telegram_id: int, username: Optional[str], full_name: str) -> User:
+    async def get_or_create(
+        telegram_id: int, 
+        username: Optional[str], 
+        full_name: str,
+        language: Optional[str] = None
+    ) -> User:
         """
-        Получить или создать пользователя
+        Get or create user
         
         Args:
-            telegram_id: ID пользователя в Telegram
-            username: Username пользователя
-            full_name: Полное имя пользователя
+            telegram_id: User's Telegram ID
+            username: User's username
+            full_name: User's full name
+            language: User's preferred language
             
         Returns:
-            Объект пользователя
+            User object
         """
-        # Сначала проверяем, существует ли пользователь
+        # First check if user exists
         result = await UserDAL.db.fetchrow(select(User).where(User.user_id == telegram_id))
         
         if not result:
-            # Если пользователь не найден, создаем нового
+            # If user not found, create new
             async with UserDAL.db.session() as session:
                 user = User(
                     user_id=telegram_id,
                     username=username,
                     full_name=full_name,
                     is_active=True,
-                    created_at=datetime.now()
+                    created_at=datetime.now(),
+                    language=language or config.localization.default_language
                 )
                 session.add(user)
                 await session.commit()
@@ -61,7 +69,7 @@ class UserDAL:
         
         user = result[0]
         
-        # Проверяем, нужно ли обновить данные пользователя
+        # Check if we need to update user data
         need_update = False
         update_data = {}
         
@@ -73,13 +81,18 @@ class UserDAL:
             update_data["full_name"] = full_name
             need_update = True
         
-        # Если пользователь неактивен, активируем его
+        # If user is inactive, activate
         if not user.is_active:
             update_data["is_active"] = True
             need_update = True
+            
+        # If language is provided and different from current
+        if language and user.language != language:
+            update_data["language"] = language
+            need_update = True
         
         if need_update:
-            # Обновляем данные пользователя
+            # Update user data
             query = (
                 update(User)
                 .where(User.user_id == telegram_id)
@@ -91,14 +104,36 @@ class UserDAL:
             return result[0]
         
         return user
+        
+    @staticmethod
+    async def set_language(telegram_id: int, language: str) -> Optional[User]:
+        """
+        Set user's preferred language
+        
+        Args:
+            telegram_id: User's Telegram ID
+            language: Language code
+            
+        Returns:
+            Updated user or None if not found
+        """
+        query = (
+            update(User)
+            .where(User.user_id == telegram_id)
+            .values(language=language)
+            .returning(User)
+        )
+        
+        result = await UserDAL.db.fetchrow(query)
+        return result[0] if result else None
     
     @staticmethod
     async def get_active_users() -> List[User]:
         """
-        Получить всех активных пользователей
+        Get all active users
         
         Returns:
-            Список активных пользователей
+            List of active users
         """
         query = select(User).where(User.is_active == True)
         result = await UserDAL.db.fetch(query)
@@ -107,10 +142,10 @@ class UserDAL:
     @staticmethod
     async def get_new_users_today() -> List[User]:
         """
-        Получить пользователей, зарегистрированных сегодня
+        Get users registered today
         
         Returns:
-            Список новых пользователей
+            List of new users
         """
         today = datetime.now().date()
         query = select(User).where(User.created_at >= today)
@@ -120,13 +155,13 @@ class UserDAL:
     @staticmethod
     async def mark_inactive(telegram_id: int) -> bool:
         """
-        Отметить пользователя как неактивного
+        Mark user as inactive
         
         Args:
-            telegram_id: ID пользователя в Telegram
+            telegram_id: User's Telegram ID
             
         Returns:
-            True если пользователь был отмечен неактивным, False в противном случае
+            True if user was marked inactive, False otherwise
         """
         query = (
             update(User)
@@ -141,10 +176,10 @@ class UserDAL:
     @staticmethod
     async def count_active() -> int:
         """
-        Подсчитать количество активных пользователей
+        Count active users
         
         Returns:
-            Количество активных пользователей
+            Number of active users
         """
         query = select(func.count()).select_from(User).where(User.is_active == True)
         return await UserDAL.db.fetchval(query) or 0
@@ -152,14 +187,26 @@ class UserDAL:
     @staticmethod
     async def get_by_id(user_id: int) -> Optional[User]:
         """
-        Получить пользователя по ID в базе данных
+        Get user by database ID
         
         Args:
-            user_id: ID пользователя в базе данных
+            user_id: User's database ID
             
         Returns:
-            Пользователь или None если не найден
+            User or None if not found
         """
         query = select(User).where(User.id == user_id)
         result = await UserDAL.db.fetchrow(query)
         return result[0] if result else None
+        
+    @staticmethod
+    async def get_all() -> List[User]:
+        """
+        Get all users
+        
+        Returns:
+            List of all users
+        """
+        query = select(User)
+        result = await UserDAL.db.fetch(query)
+        return [row[0] for row in result]

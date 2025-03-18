@@ -205,7 +205,7 @@ async def edit_tariff(callback: CallbackQuery, state: FSMContext):
     
     await callback.message.edit_text(
         tariff_info,
-        reply_markup=builder.as_markup()
+        reply_markup=builder.as_markup(), parse_mode='HTML'
     )
     await callback.answer()
 

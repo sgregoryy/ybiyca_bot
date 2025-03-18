@@ -89,6 +89,29 @@ class TariffDAL:
         return result[0] if result else None
     
     @staticmethod
+    async def update(tariff_id: int, **kwargs) -> Optional[TariffPlan]:
+        """
+        Обновить тарифный план
+        
+        Args:
+            tariff_id: ID тарифного плана
+            kwargs: Параметры для обновления
+            
+        Returns:
+            Обновленный тарифный план или None если не найден
+        """
+        # Обновляем тарифный план
+        query = (
+            update(TariffPlan)
+            .where(TariffPlan.id == tariff_id)
+            .values(**kwargs)
+            .returning(TariffPlan)
+        )
+        
+        result = await TariffDAL.db.fetchrow(query)
+        return result[0] if result else None
+    
+    @staticmethod
     async def initialize_default_plans(default_plans: List[Dict[str, Any]]) -> List[TariffPlan]:
         """
         Инициализировать стандартные тарифные планы

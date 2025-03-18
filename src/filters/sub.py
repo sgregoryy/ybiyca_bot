@@ -1,7 +1,7 @@
 from aiogram.types import CallbackQuery
 from aiogram.filters import BaseFilter
 from aiogram.utils.i18n import lazy_gettext as __
-from config import config
+from src.config import config
 
 class SubscriptionFilter(BaseFilter):
     def __init__(self):

@@ -57,11 +57,12 @@ async def broadcast_message(bot, text, disable_notification=False):
     
     return success_count
 
+router.message.filter(AdminFilter())
+
 @router.message(Command("admin"))
 async def cmd_admin(message: Message):
-    # Проверяем, является ли пользователь администратором
-    if message.from_user.id in config.telegram.admin_ids:
-        await message.answer("👑 Панель администратора", reply_markup=AdminKeyboard.admin_menu())
+
+    await message.answer("👑 Панель администратора", reply_markup=AdminKeyboard.admin_menu())
 
 @router.callback_query(F.data == "admin:statistics")
 async def show_statistics(callback: CallbackQuery):
@@ -102,7 +103,7 @@ async def show_statistics(callback: CallbackQuery):
     for plan_name, count in plan_stats.items():
         stats_text += f"- {plan_name}: {count}\n"
     
-    await callback.message.edit_text(stats_text, reply_markup=AdminKeyboard.admin_menu())
+    await callback.message.edit_text(stats_text, reply_markup=AdminKeyboard.admin_menu(), parse_mode='HTML')
     await callback.answer()
 
 @router.callback_query(F.data == "admin:broadcast")
@@ -171,7 +172,7 @@ async def show_pending_payments(callback: CallbackQuery):
     
     await callback.message.edit_text(
         payments_text,
-        reply_markup=AdminKeyboard.admin_menu()
+        reply_markup=AdminKeyboard.admin_menu(), parse_mode='HTML'
     )
     await callback.answer()
 
@@ -197,7 +198,7 @@ async def manage_tariffs(callback: CallbackQuery):
     
     await callback.message.edit_text(
         tariffs_text,
-        reply_markup=AdminKeyboard.manage_tariffs_menu()
+        reply_markup=AdminKeyboard.manage_tariffs_menu(), parse_mode='HTML'
     )
     await callback.answer()
 

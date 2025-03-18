@@ -1,7 +1,3 @@
-"""
-Класс Database для работы с базой данных через SQLAlchemy.
-"""
-
 import logging
 from typing import Any, Optional, Sequence, Dict, TypeVar, Type
 from sqlalchemy import select, Row

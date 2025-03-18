@@ -30,7 +30,12 @@ async def cmd_start(message: Message):
         full_name=f"{message.from_user.first_name} {message.from_user.last_name or ''}"
     )
     
-    # Проверяем подписку на спонсорский канал
+    # Если подписка не требуется, сразу показываем основное меню
+    if not config.telegram.require_subscription:
+        await show_main_menu(message)
+        return
+    
+    # Проверяем подписку на спонсорский канал только если это требуется
     is_subscribed = await check_channel_subscription(
         message.bot, 
         message.from_user.id, 
@@ -51,6 +56,13 @@ async def cmd_start(message: Message):
 
 @router.callback_query(F.data == "check_subscription")
 async def check_subscription_callback(callback: CallbackQuery):
+    # Если подписка не требуется, сразу показываем основное меню
+    if not config.telegram.require_subscription:
+        await callback.message.delete()
+        await show_main_menu(callback.message)
+        await callback.answer("Теперь вы можете пользоваться ботом")
+        return
+    
     is_subscribed = await check_channel_subscription(
         callback.bot, 
         callback.from_user.id,
