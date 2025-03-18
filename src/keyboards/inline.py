@@ -177,13 +177,11 @@ class AdminKeyboard:
     def admin_menu():
         builder = InlineKeyboardBuilder()
         
-        # Эти функции всегда доступны
         builder.add(
             InlineKeyboardButton(text="📊 Статистика", callback_data="admin:statistics"),
             InlineKeyboardButton(text="📨 Рассылка", callback_data="admin:broadcast")
         )
         
-        # Опциональные функции, зависящие от конфигурации
         if config.admin.manage_tariffs_enabled:
             builder.add(InlineKeyboardButton(text="📝 Управление тарифами", callback_data="admin:manage_tariffs"))
             

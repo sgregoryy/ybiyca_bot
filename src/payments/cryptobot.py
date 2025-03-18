@@ -11,7 +11,7 @@ from src.db.DALS.subscription import SubscriptionDAL
 from src.db.DALS.tariff import TariffDAL
 from src.keyboards.reply import MainKeyboard
 
-from config import config
+from src.config import config
 
 logger = logging.getLogger(__name__)
 

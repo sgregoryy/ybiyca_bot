@@ -254,3 +254,49 @@ class SubscriptionDAL:
         """
         query = select(func.count()).select_from(Subscription).where(Subscription.is_active == True)
         return await SubscriptionDAL.db.fetchval(query) or 0
+    
+    @staticmethod
+    async def get_expired_active() -> List[Tuple[Subscription, TariffPlan, User]]:
+        """
+        Получить истекшие активные подписки
+        
+        Returns:
+            Список кортежей (подписка, тарифный план, пользователь)
+        """
+        now = datetime.now()
+        
+        query = (
+            select(Subscription, TariffPlan, User)
+            .join(TariffPlan, Subscription.plan_id == TariffPlan.id)
+            .join(User, Subscription.user_id == User.id)
+            .where(
+                and_(
+                    Subscription.is_active == True,
+                    Subscription.end_date < now
+                )
+            )
+        )
+        
+        result = await SubscriptionDAL.db.fetch(query)
+        return result if result else []
+    
+    @staticmethod
+    async def deactivate_subscription(subscription_id: int) -> bool:
+        """
+        Деактивировать подписку
+        
+        Args:
+            subscription_id: ID подписки
+            
+        Returns:
+            True если подписка успешно деактивирована, False в противном случае
+        """
+        query = (
+            update(Subscription)
+            .where(Subscription.id == subscription_id)
+            .values(is_active=False)
+            .returning(Subscription.id)
+        )
+        
+        result = await SubscriptionDAL.db.fetchval(query)
+        return result is not None
