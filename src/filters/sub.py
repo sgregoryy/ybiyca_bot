@@ -1,6 +1,7 @@
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import BaseFilter
 from aiogram.utils.i18n import lazy_gettext as __
+from src.keyboards.inline import SubscriptionKeyboard
 from src.config import config
 
 class SubscriptionFilter(BaseFilter):
@@ -16,7 +17,8 @@ class SubscriptionFilter(BaseFilter):
             else:
                 await bot.send_message(
                     chat_id=callback.from_user.id,
-                    text=__("Для использования бота необходимо подписаться на канал")
+                    text=__("Для использования бота необходимо подписаться на канал"),
+                    reply_markup=SubscriptionKeyboard.subscribe_channel(config.channels.sponsor_channel_link)
                 )
                 return False
         except Exception:

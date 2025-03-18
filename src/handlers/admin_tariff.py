@@ -346,11 +346,6 @@ async def delete_tariff(callback: CallbackQuery, state: FSMContext):
         )
         return
     
-    # Проверяем, есть ли платежи, связанные с этим тарифом
-    # Эта проверка упрощена, так как у нас нет прямого метода в PaymentDAL
-    # Для полноценной реализации нужно добавить соответствующий метод
-    
-    # Вместо удаления деактивируем тариф
     await TariffDAL.toggle_active(tariff_id)
     
     await callback.answer(

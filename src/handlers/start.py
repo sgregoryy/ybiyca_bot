@@ -1,4 +1,4 @@
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from src.keyboards.inline import SubscriptionKeyboard
@@ -10,7 +10,7 @@ import logging
 router = Router()
 logger = logging.getLogger(__name__)
 
-async def check_channel_subscription(bot, user_id, channel_id):
+async def check_channel_subscription(bot: Bot, user_id, channel_id):
     """
     Проверяет, подписан ли пользователь на канал
     """

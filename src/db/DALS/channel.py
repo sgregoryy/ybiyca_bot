@@ -399,3 +399,25 @@ class ChannelDAL:
             import logging
             logging.getLogger(__name__).error(f"Ошибка при обновлении планов для канала {channel_id}: {e}")
             return False
+        
+    @staticmethod
+    async def check_plan_has_access_to_channel(plan_id: int, channel_id: int) -> bool:
+        """
+        Проверяет, имеет ли тарифный план доступ к указанному каналу
+        
+        Args:
+            plan_id: ID тарифного плана
+            channel_id: ID канала в базе данных
+            
+        Returns:
+            True если тарифный план имеет доступ к каналу, False в противном случае
+        """
+        query = select(ChannelAccessPlan).where(
+            and_(
+                ChannelAccessPlan.plan_id == plan_id,
+                ChannelAccessPlan.channel_id == channel_id
+            )
+        )
+        
+        result = await ChannelDAL.db.fetchrow(query)
+        return result is not None
