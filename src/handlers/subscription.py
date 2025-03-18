@@ -5,6 +5,7 @@ from datetime import datetime
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
 
+from src.filters.sub import SubscriptionFilter
 from src.db.models import TariffPlan
 from src.keyboards.inline import SubscriptionKeyboard
 from src.keyboards.reply import MainKeyboard
@@ -30,20 +31,49 @@ import logging
 router = Router()
 logger = logging.getLogger(__name__)
 
+if config.telegram.require_subscription:
+    router.message.filter(SubscriptionFilter())
+    router.callback_query.filter(SubscriptionFilter())
 
 @router.message(F.text == "💼 Тарифы")
 async def show_channels_for_subscription(message: Message):
-    """Показывает список каналов для выбора подписки"""
-    # Получаем активные каналы
+    """Показывает доступные тарифы или список каналов для выбора"""
     channels = await ChannelDAL.get_active_channels()
     
     if not channels:
         await message.answer("В данный момент нет доступных каналов для подписки.")
         return
     
+    if len(channels) == 1:
+        channel = channels[0]
+        tariffs = await TariffDAL.get_tariffs_by_channel(channel.id)
+        
+        if not tariffs:
+            await message.answer("Для этого канала нет доступных тарифов.")
+            return
+        
+        plans_text = f"📋 <b>Тарифы для канала {channel.name}</b>\n\n"
+        
+        for plan in tariffs:
+            plans_text += f"<b>{plan.name}</b> - {plan.price}₽\n"
+        
+        plans_text += "\nВыберите подходящий тарифный план:"
+        
+        builder = InlineKeyboardBuilder()
+        
+        for plan in tariffs:
+            builder.add(InlineKeyboardButton(
+                text=f"{plan.name} - {plan.price}₽",
+                callback_data=f"plan:{plan.id}"
+            ))
+        
+        builder.adjust(1)
+        
+        await message.answer(plans_text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        return
+    
     text = "📺 <b>Выберите канал для подписки:</b>\n\n"
     
-    # Создаем клавиатуру с каналами
     builder = InlineKeyboardBuilder()
     
     for channel in channels:

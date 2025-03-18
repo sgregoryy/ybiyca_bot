@@ -14,7 +14,7 @@ class SubscriptionFilter(BaseFilter):
     Используется только если config.telegram.require_subscription=True
     """
     async def __call__(self, event: Union[Message, CallbackQuery]) -> bool:
-
+        logger.info('jjjjjjjjjjjjjjj')
         if not config.telegram.require_subscription:
             return True 
 
@@ -39,9 +39,10 @@ class SubscriptionFilter(BaseFilter):
                 return True
             else:
                 if isinstance(event, Message):
+                    logger.info('ccccccccccccccccccccccc')
                     await bot.send_message(
                         chat_id=user_id,
-                        text=__("Для использования бота необходимо подписаться на канал"),
+                        text=("Для использования бота необходимо подписаться на канал"),
                         reply_markup=SubscriptionKeyboard.subscribe_channel(config.telegram.sponsor_channel_link)
                     )
                 return False

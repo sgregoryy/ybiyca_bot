@@ -133,7 +133,6 @@ async def process_payment_notification(notification_data: dict) -> bool:
         if payment:
             await PaymentDAL.update_payment(payment_id=payment.id, status="approved", processed_at=datetime.now())
         else:
-            
 
             currency = await CurrencyDAL.get_by_code("RUB")
             if not currency:
@@ -184,9 +183,7 @@ async def process_payment_notification(notification_data: dict) -> bool:
         return False
 
 
-async def yookassa_payment_route(
-    callback: CallbackQuery, plan: TariffPlan, default_currency, final_price
-):
+async def yookassa_payment_route(callback: CallbackQuery, plan: TariffPlan, default_currency, final_price):
     user = await UserDAL.get_or_create(
         telegram_id=callback.from_user.id,
         username=callback.from_user.username,

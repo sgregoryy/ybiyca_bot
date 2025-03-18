@@ -51,7 +51,7 @@ async def init_payment_methods():
         try:
             currency = await CurrencyDAL.get_by_code(currency_data["code"])
             if not currency:
-                await CurrencyDAL.create_currency(
+                currency = await CurrencyDAL.create_currency(
                     code=currency_data["code"],
                     name=currency_data["name"],
                     symbol=currency_data["symbol"],
@@ -63,12 +63,19 @@ async def init_payment_methods():
         except Exception as e:
             logger.error(f"Ошибка при создании валюты {currency_data['code']}: {e}")
     
-
+    # Получаем валюту RUB (будет по умолчанию для большинства методов)
+    rub_currency = await CurrencyDAL.get_by_code("RUB")
+    if not rub_currency:
+        logger.error("Не удалось получить валюту RUB")
+        return
+    
+    # Дополнительно создаем валюту STARS, если включена оплата звездами
+    stars_currency = None
     if config.payment.stars_enabled:
         try:
             stars_currency = await CurrencyDAL.get_by_code("STARS")
             if not stars_currency:
-                await CurrencyDAL.create_currency(
+                stars_currency = await CurrencyDAL.create_currency(
                     code="STARS",
                     name="Telegram Stars",
                     symbol="⭐",
@@ -80,9 +87,7 @@ async def init_payment_methods():
         except Exception as e:
             logger.error(f"Ошибка при создании валюты STARS: {e}")
     
-
-    
-
+    # Ручной платеж (карта)
     if config.payment.manual_payment_enabled:
         try:
             manual_method = await PaymentMethodDAL.get_by_code("manual")
@@ -90,6 +95,7 @@ async def init_payment_methods():
                 await PaymentMethodDAL.create_method(
                     name="Банковская карта (вручную)",
                     code="manual",
+                    default_currency_id=rub_currency.id,
                     price_modifier=0,
                     fixed_fee=0
                 )
@@ -99,7 +105,7 @@ async def init_payment_methods():
         except Exception as e:
             logger.error(f"Ошибка при создании метода оплаты 'manual': {e}")
     
-
+    # ЮKassa
     if config.payment.youkassa_enabled:
         try:
             youkassa_method = await PaymentMethodDAL.get_by_code("youkassa")
@@ -107,6 +113,7 @@ async def init_payment_methods():
                 await PaymentMethodDAL.create_method(
                     name="Банковская карта (ЮKassa)",
                     code="youkassa",
+                    default_currency_id=rub_currency.id,
                     price_modifier=0,
                     fixed_fee=0
                 )
@@ -116,7 +123,7 @@ async def init_payment_methods():
         except Exception as e:
             logger.error(f"Ошибка при создании метода оплаты 'youkassa': {e}")
     
-
+    # Tinkoff
     if config.payment.tinkoff_enabled:
         try:
             tinkoff_method = await PaymentMethodDAL.get_by_code("tinkoff")
@@ -124,6 +131,7 @@ async def init_payment_methods():
                 await PaymentMethodDAL.create_method(
                     name="Банковская карта (Tinkoff)",
                     code="tinkoff",
+                    default_currency_id=rub_currency.id,
                     price_modifier=0,
                     fixed_fee=0
                 )
@@ -133,14 +141,15 @@ async def init_payment_methods():
         except Exception as e:
             logger.error(f"Ошибка при создании метода оплаты 'tinkoff': {e}")
     
-
-    if config.payment.stars_enabled:
+    # Звезды Telegram
+    if config.payment.stars_enabled and stars_currency:
         try:
             stars_method = await PaymentMethodDAL.get_by_code("stars")
             if not stars_method:
                 await PaymentMethodDAL.create_method(
                     name="Звезды Telegram",
                     code="stars",
+                    default_currency_id=stars_currency.id,
                     price_modifier=0,
                     fixed_fee=0
                 )
@@ -150,14 +159,18 @@ async def init_payment_methods():
         except Exception as e:
             logger.error(f"Ошибка при создании метода оплаты 'stars': {e}")
     
-
+    # CryptoBot
     if config.payment.cryptobot_enabled:
         try:
+            usdt_currency = await CurrencyDAL.get_by_code("USDT")
+            crypto_currency_id = usdt_currency.id if usdt_currency else rub_currency.id
+            
             crypto_method = await PaymentMethodDAL.get_by_code("cryptobot")
             if not crypto_method:
                 await PaymentMethodDAL.create_method(
                     name="Криптовалюта",
                     code="cryptobot",
+                    default_currency_id=crypto_currency_id,
                     price_modifier=0,
                     fixed_fee=0
                 )
@@ -168,7 +181,6 @@ async def init_payment_methods():
             logger.error(f"Ошибка при создании метода оплаты 'cryptobot': {e}")
     
     logger.info("Методы оплаты инициализированы")
-
 
 def is_web_service_needed() -> bool:
     """Проверяет, нужен ли веб-сервис на основе конфигурации"""
@@ -226,22 +238,6 @@ async def init_tariff_plans():
     logger.info("Тарифные планы инициализированы")
 
 
-async def init_channels():
-    """Инициализация каналов"""
-    if config.telegram.require_subscription and config.telegram.sponsor_channel_id:
-        sponsor_channel = await ChannelDAL.get_by_telegram_id(config.telegram.sponsor_channel_id)
-        
-        if not sponsor_channel:
-            await ChannelDAL.create_channel(
-                name="Спонсорский канал",
-                channel_id=config.telegram.sponsor_channel_id,
-                invite_link=config.telegram.sponsor_channel_link
-            )
-            logger.info("Спонсорский канал инициализирован")
-        
-    logger.info("Каналы инициализированы")
-
-
 async def scheduled_task_checker(bot: Bot):
     """Запускает периодические проверки подписок и отправку уведомлений"""
     while True:
@@ -268,9 +264,6 @@ async def on_startup(bot: Bot):
     """Действия при запуске бота"""
     logger.info("Инициализация базы данных...")
     await init_db()
-    
-    logger.info("Инициализация каналов...")
-    await init_channels()
     
     logger.info("Инициализация тарифных планов...")
     await init_tariff_plans()

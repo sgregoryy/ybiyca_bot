@@ -10,6 +10,7 @@ import logging
 router = Router()
 logger = logging.getLogger(__name__)
 
+
 async def check_channel_subscription(bot: Bot, user_id, channel_id):
     """
     Проверяет, подписан ли пользователь на канал
@@ -21,60 +22,56 @@ async def check_channel_subscription(bot: Bot, user_id, channel_id):
         logger.error(f"Ошибка при проверке подписки: {e}")
         return False
 
+
 @router.message(Command("start"))
 async def cmd_start(message: Message):
-    # Создаем или получаем пользователя
+
     user = await UserDAL.get_or_create(
         telegram_id=message.from_user.id,
         username=message.from_user.username,
-        full_name=f"{message.from_user.first_name} {message.from_user.last_name or ''}"
+        full_name=f"{message.from_user.first_name} {message.from_user.last_name or ''}",
     )
-    
-    # Если подписка не требуется, сразу показываем основное меню
+
     if not config.telegram.require_subscription:
         await show_main_menu(message)
         return
-    
-    # Проверяем подписку на спонсорский канал только если это требуется
+
     is_subscribed = await check_channel_subscription(
-        message.bot, 
-        message.from_user.id, 
-        config.telegram.sponsor_channel_id
+        message.bot, message.from_user.id, config.telegram.sponsor_channel_id
     )
-    
+
     if not is_subscribed:
         text = (
             f"👋 Привет, {message.from_user.first_name}!\n\n"
             f"Для использования бота, пожалуйста, подпишитесь на наш канал-спонсор"
         )
         await message.answer(
-            text,
-            reply_markup=SubscriptionKeyboard.subscribe_channel(config.telegram.sponsor_channel_link)
+            text, reply_markup=SubscriptionKeyboard.subscribe_channel(config.telegram.sponsor_channel_link)
         )
     else:
         await show_main_menu(message)
 
+
 @router.callback_query(F.data == "check_subscription")
 async def check_subscription_callback(callback: CallbackQuery):
-    # Если подписка не требуется, сразу показываем основное меню
+
     if not config.telegram.require_subscription:
         await callback.message.delete()
         await show_main_menu(callback.message)
         await callback.answer("Теперь вы можете пользоваться ботом")
         return
-    
+
     is_subscribed = await check_channel_subscription(
-        callback.bot, 
-        callback.from_user.id,
-        config.telegram.sponsor_channel_id
+        callback.bot, callback.from_user.id, config.telegram.sponsor_channel_id
     )
-    
+
     if is_subscribed:
         await callback.message.delete()
         await show_main_menu(callback.message)
         await callback.answer("Спасибо за подписку! Теперь вы можете пользоваться ботом")
     else:
         await callback.answer("Вы не подписаны на канал. Пожалуйста, подпишитесь, чтобы продолжить", show_alert=True)
+
 
 async def show_main_menu(message: Message):
     text = f"👋 Добро пожаловать, {message.from_user.first_name}!\n\nВыберите действие из меню"
