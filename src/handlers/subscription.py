@@ -54,8 +54,8 @@ async def show_channels_for_subscription(message: Message):
         
         plans_text = f"📋 <b>Тарифы для канала {channel.name}</b>\n\n"
         
-        for plan in tariffs:
-            plans_text += f"<b>{plan.name}</b> - {plan.price}₽\n"
+        # for plan in tariffs:
+        #     plans_text += f"<b>{plan.name}</b> - {plan.price}₽\n"
         
         plans_text += "\nВыберите подходящий тарифный план:"
         
