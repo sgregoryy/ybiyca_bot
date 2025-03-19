@@ -3,6 +3,7 @@ import logging
 import platform
 import signal
 import uvicorn
+import aiocron
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiohttp import web
@@ -238,28 +239,6 @@ async def init_tariff_plans():
     logger.info("Тарифные планы инициализированы")
 
 
-async def scheduled_task_checker(bot: Bot):
-    """Запускает периодические проверки подписок и отправку уведомлений"""
-    while True:
-        try:
-            logger.info("Запуск проверки истёкших подписок")
-            await check_expired_subscriptions(bot)
-            
-
-            logger.info("Запуск проверки подписок, истекающих через 1 день")
-            await check_subscriptions_ending_soon(bot, days_threshold=1)
-            
-
-            logger.info("Запуск проверки подписок, истекающих через 3 дня")
-            await check_subscriptions_ending_soon(bot, days_threshold=3)
-            
-        except Exception as e:
-            logger.error(f"Ошибка при выполнении периодических задач: {e}")
-        
-
-        await asyncio.sleep(6 * 60 * 60)
-
-
 async def on_startup(bot: Bot):
     """Действия при запуске бота"""
     logger.info("Инициализация базы данных...")
@@ -271,9 +250,25 @@ async def on_startup(bot: Bot):
     logger.info("Инициализация методов оплаты...")
     await init_payment_methods()
     
-
-    asyncio.create_task(scheduled_task_checker(bot))
+    # Настройка cron-задач
+    aiocron.crontab('0 0 * * *', func=lambda: check_expired_subscriptions(bot), start=True)
+    aiocron.crontab('0 0 * * *', func=lambda: check_subscriptions_ending_soon(bot, days_threshold=1), start=True)
+    aiocron.crontab('0 0 * * *', func=lambda: check_subscriptions_ending_soon(bot, days_threshold=3), start=True)
     
+    logger.info("Cron-задачи настроены")
+    logger.info("Бот успешно запущен!")
+
+async def on_startup(bot: Bot):
+    """Действия при запуске бота"""
+    logger.info("Инициализация базы данных...")
+    await init_db()
+    
+    logger.info("Инициализация тарифных планов...")
+    await init_tariff_plans()
+    
+    logger.info("Инициализация методов оплаты...")
+    await init_payment_methods()
+        
     logger.info("Бот успешно запущен!")
 
 
