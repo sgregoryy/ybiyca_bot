@@ -21,19 +21,12 @@ from src.utils import join_request
 from src.utils.cron_func import check_expired_subscriptions, check_subscriptions_ending_soon
 from src.filters.admin import AdminFilter
 from src.filters.sub import SubscriptionFilter
+from src.utils.logging import setup_logging
 from src.webhook import yoo_router, tinkoff_router, cryptobot_router
 
 
-logging.basicConfig(
-    level=logging.INFO if not config.debug else logging.DEBUG,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-    ]
-)
 
 logger = logging.getLogger(__name__)
-
 
 async def init_payment_methods():
     """Инициализация методов оплаты"""
@@ -332,8 +325,8 @@ async def main():
     bot = Bot(token=config.telegram.token)
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
+    setup_logging()
     
-
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
     
