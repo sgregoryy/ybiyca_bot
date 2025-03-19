@@ -1,7 +1,8 @@
 services:
-  app:
+  bot:
     build: .
-    container_name: some_name
-    ports:
-      - "81:81"
+    container_name: ybica_bot
     restart: always
+    volumes:
+      - ./logs:/app/logs
+    network_mode: "host"  
