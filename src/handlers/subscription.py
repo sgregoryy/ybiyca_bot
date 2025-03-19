@@ -125,8 +125,8 @@ async def show_channel_tariffs(callback: CallbackQuery, c_id = None):
         
         plans_text = f"📋 <b>Тарифы для канала {channel.name}</b>\n\n"
         
-        for plan in tariffs:
-            plans_text += f"<b>{plan.name}</b> - {plan.price}₽\n"
+        # for plan in tariffs:
+        #     plans_text += f"<b>{plan.name}</b> - {plan.price}₽\n"
         
         plans_text += "\nВыберите подходящий тарифный план:"
         
@@ -329,7 +329,7 @@ async def process_manual_payment(
         f"Вы выбрали тариф: <b>{plan.name}</b> для канала <b>{channel.name}</b>\n\n"
         f"Сумма к оплате: <b>{final_price} {currency.symbol}</b>\n\n"
         f"Для оплаты переведите указанную сумму на следующие реквизиты:\n"
-        f"💳 <b>Номер карты:</b> {config.payment.manual_card_number}\n"
+        f"💳 <b>Номер карты:</b> <code>{config.payment.manual_card_number}</code>\n"
         f"👤 <b>Получатель:</b> {config.payment.manual_recipient_name}\n\n"
         f"После оплаты, отправьте скриншот или фото чека об оплате.\n"
         f"Ваша заявка будет обработана администратором."
