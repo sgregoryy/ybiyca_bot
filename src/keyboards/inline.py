@@ -3,7 +3,9 @@ from aiogram.types import InlineKeyboardButton
 from src.db.models import PaymentMethod, TariffPlan, Currency
 from typing import List, Optional
 from src.config import config
+import logging
 
+logger = logging.getLogger(__name__)
 
 class SubscriptionKeyboard:
     @staticmethod
@@ -165,7 +167,7 @@ class AdminKeyboard:
             InlineKeyboardButton(text="📊 Статистика", callback_data="admin:statistics"),
             InlineKeyboardButton(text="📨 Рассылка", callback_data="admin:broadcast"),
         )
-
+        logger.info(config.admin.manage_tariffs_enabled)
         if config.admin.manage_tariffs_enabled:
             builder.add(InlineKeyboardButton(text="📝 Управление тарифами", callback_data="admin:manage_tariffs"))
 

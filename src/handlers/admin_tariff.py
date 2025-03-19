@@ -135,9 +135,12 @@ async def list_tariffs_for_edit(callback: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data.startswith("tariff:edit:"))
-async def edit_tariff(callback: CallbackQuery, state: FSMContext):
+async def edit_tariff(callback: CallbackQuery, state: FSMContext, t_id = None):
 
-    tariff_id = int(callback.data.split(":")[2])
+    if t_id:
+        tariff_id = int(t_id)
+    else:
+        tariff_id = int(callback.data.split(":")[2])
 
     tariff = await TariffDAL.get_by_id(tariff_id)
 
@@ -192,7 +195,7 @@ async def edit_tariff_field(callback: CallbackQuery, state: FSMContext):
 
         await callback.answer(f"Тариф {'активирован' if tariff.is_active else 'деактивирован'}", show_alert=True)
 
-        await edit_tariff(callback, state)
+        await edit_tariff(callback, state, tariff_id)
         return
 
     await state.update_data(field=field)

@@ -98,8 +98,9 @@ class TariffDAL:
 
         query = update(TariffPlan).where(TariffPlan.id == tariff_id).values(is_active=new_state).returning(TariffPlan)
 
-        result = await TariffDAL.db.fetchrow(query)
-        return result[0] if result else None
+        result = await TariffDAL.db.execute(query)
+        result = result.scalar_one_or_none()
+        return result
 
     @staticmethod
     async def update(tariff_id: int, **kwargs) -> Optional[TariffPlan]:
@@ -116,8 +117,9 @@ class TariffDAL:
 
         query = update(TariffPlan).where(TariffPlan.id == tariff_id).values(**kwargs).returning(TariffPlan)
 
-        result = await TariffDAL.db.fetchrow(query)
-        return result[0] if result else None
+        result = await TariffDAL.db.execute(query)
+        result = result.scalar_one_or_none()
+        return result
 
     @staticmethod
     async def initialize_default_plans(
