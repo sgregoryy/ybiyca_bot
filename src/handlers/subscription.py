@@ -6,7 +6,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
 
 from src.filters.sub import SubscriptionFilter
-from src.db.models import TariffPlan
+from src.db.models import Channel, TariffPlan
 from src.keyboards.inline import SubscriptionKeyboard
 from src.keyboards.reply import MainKeyboard
 from src.utils.states import PaymentStates
@@ -88,9 +88,12 @@ async def show_channels_for_subscription(message: Message):
 
 
 @router.callback_query(F.data.startswith("select_channel:"))
-async def show_channel_tariffs(callback: CallbackQuery):
+async def show_channel_tariffs(callback: CallbackQuery, c_id = None):
     """Показывает тарифы для выбранного канала"""
-    channel_id = int(callback.data.split(":")[1])
+    if c_id:
+        channel_id = int(c_id)
+    else:
+        channel_id = int(callback.data.split(":")[1])
     
     # Получаем информацию о канале
     channel = await ChannelDAL.get_by_id(channel_id)
@@ -110,6 +113,34 @@ async def show_channel_tariffs(callback: CallbackQuery):
                 InlineKeyboardButton(text="◀️ Назад к каналам", callback_data="back_to_channels")
             ).as_markup()
         )
+        return
+    channels = await ChannelDAL.get_active_channels()
+    if len(channels) == 1:
+        channel = channels[0]
+        tariffs = await TariffDAL.get_tariffs_by_channel(channel.id)
+        
+        if not tariffs:
+            await callback.message.edit_text("Для этого канала нет доступных тарифов.")
+            return
+        
+        plans_text = f"📋 <b>Тарифы для канала {channel.name}</b>\n\n"
+        
+        for plan in tariffs:
+            plans_text += f"<b>{plan.name}</b> - {plan.price}₽\n"
+        
+        plans_text += "\nВыберите подходящий тарифный план:"
+        
+        builder = InlineKeyboardBuilder()
+        
+        for plan in tariffs:
+            builder.add(InlineKeyboardButton(
+                text=f"{plan.name} - {plan.price}₽",
+                callback_data=f"plan:{plan.id}"
+            ))
+        
+        builder.adjust(1)
+        
+        await callback.message.edit_text(plans_text, reply_markup=builder.as_markup(), parse_mode="HTML")
         return
     
     plans_text = f"📋 <b>Тарифы для канала {channel.name}</b>\n\n"
@@ -287,7 +318,7 @@ async def process_manual_payment(
     callback: CallbackQuery, 
     state: FSMContext, 
     plan: TariffPlan, 
-    channel, 
+    channel: Channel, 
     payment_method, 
     currency, 
     final_price
@@ -305,9 +336,13 @@ async def process_manual_payment(
     )
 
     await callback.message.edit_text(
-        payment_text, reply_markup=SubscriptionKeyboard.back_to_tariffs(), parse_mode="HTML"
+        payment_text, reply_markup=SubscriptionKeyboard.back_to_tariffs(channel.id), parse_mode="HTML"
     )
 
+@router.callback_query(F.data.startswith('back_to_tariffs:'))
+async def handle_back_to_tariffs(call: CallbackQuery):
+    channel_id = call.data.split(':')[1]
+    await show_channel_tariffs(call, c_id=channel_id)
 
 @router.callback_query(F.data == "cancel_payment")
 async def cancel_payment_process(callback: CallbackQuery, state: FSMContext):

@@ -5,6 +5,8 @@ Data Access Layer для работы с тарифными планами.
 from sqlalchemy import select, update, and_, desc, func
 from src.db.database import get_db
 from src.db.models import TariffPlan
+from src.db.DALS.channel import ChannelDAL
+from src.config import config
 from typing import List, Optional, Dict, Any
 
 
@@ -135,11 +137,22 @@ class TariffDAL:
 
         if default_channel_id is None:
             return result
+        channel_flag = await ChannelDAL.get_by_telegram_id(default_channel_id)
+
+        if not channel_flag:
+            channel = await ChannelDAL.create_channel(
+                name=config.channels.content_channel_name,
+                channel_id=config.channels.content_channel_id,
+                invite_link=config.channels.content_channel_link,
+            )
+            channel_id = channel.id
+        else:
+            channel_id = 1
 
         for plan_data in default_plans:
 
             plan_data_with_channel = plan_data.copy()
-            plan_data_with_channel["channel_id"] = default_channel_id
+            plan_data_with_channel["channel_id"] = channel_id
 
             plan = await TariffDAL.get_by_code(plan_data["code"])
 

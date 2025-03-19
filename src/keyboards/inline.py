@@ -112,7 +112,7 @@ class SubscriptionKeyboard:
         return builder.as_markup()
 
     @staticmethod
-    def back_to_tariffs():
+    def back_to_tariffs(channel_id):
         """
         Создаёт клавиатуру для возврата к тарифам
 
@@ -120,7 +120,7 @@ class SubscriptionKeyboard:
             Клавиатура для возврата к тарифам
         """
         builder = InlineKeyboardBuilder()
-        builder.add(InlineKeyboardButton(text="◀️ Назад к тарифам", callback_data="back_to_tariffs"))
+        builder.add(InlineKeyboardButton(text="◀️ Назад к тарифам", callback_data=f"back_to_tariffs:{channel_id}"))
         return builder.as_markup()
 
     @staticmethod

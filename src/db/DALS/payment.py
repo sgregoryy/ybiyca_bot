@@ -7,7 +7,9 @@ from sqlalchemy import select, update, and_, func
 from src.db.database import get_db
 from src.db.models import Payment, User, TariffPlan, Currency, PaymentMethod
 from typing import List, Optional, Tuple, Dict, Any
+import logging
 
+logger = logging.getLogger(__name__)
 
 class PaymentDAL:
     """DAL для работы с платежами"""
@@ -197,12 +199,14 @@ class PaymentDAL:
             .returning(Payment)
         )
 
-        updated_result = await PaymentDAL.db.fetchrow(update_query)
-        if not updated_result:
+        # При использовании execute нужно по-другому получать результат
+        result = await PaymentDAL.db.execute(update_query)
+        updated_payment = result.scalar_one_or_none()  # Получаем один результат или None
+        
+        if not updated_payment:
             return None
 
-        updated_payment = updated_result[0]
-
+        # Возвращаем обновленный платеж вместо первоначального
         return (updated_payment, user, plan, currency, payment_method)
 
     @staticmethod

@@ -219,6 +219,22 @@ async def create_fastapi_app() -> FastAPI:
     return app
 
 
+async def init_channels():
+    logger.info(f"{config.channels.multi_channel_mode} {config.channels.content_channel_id}")
+    if not config.channels.multi_channel_mode and config.channels.content_channel_id:
+        content_channel = await ChannelDAL.get_by_telegram_id(config.channels.content_channel_id)
+        
+        if not content_channel:
+            await ChannelDAL.create_channel(
+                name=config.channels.content_channel_name,
+                channel_id=config.channels.content_channel_id,
+                invite_link=config.channels.content_channel_link
+            )
+            logger.info(f"Контент-канал '{config.channels.content_channel_name}' инициализирован для моно-канального режима")
+    
+    logger.info("Каналы инициализированы")
+
+
 async def init_tariff_plans():
     """Инициализация тарифных планов"""
     default_plans = [
@@ -234,7 +250,7 @@ async def init_tariff_plans():
             default_channel_id = channels[0].id
             await TariffDAL.initialize_default_plans(default_plans, default_channel_id)
     else:
-        await TariffDAL.initialize_default_plans(default_plans)
+        await TariffDAL.initialize_default_plans(default_plans, default_channel_id=config.channels.content_channel_id)
     
     logger.info("Тарифные планы инициализированы")
 
@@ -244,6 +260,9 @@ async def on_startup(bot: Bot):
     logger.info("Инициализация базы данных...")
     await init_db()
     
+    logger.info("Инициализация каналов...")
+    await init_channels()
+    
     logger.info("Инициализация тарифных планов...")
     await init_tariff_plans()
     
@@ -251,24 +270,11 @@ async def on_startup(bot: Bot):
     await init_payment_methods()
     
     # Настройка cron-задач
-    aiocron.crontab('0 0 * * *', func=lambda: check_expired_subscriptions(bot), start=True)
-    aiocron.crontab('0 0 * * *', func=lambda: check_subscriptions_ending_soon(bot, days_threshold=1), start=True)
-    aiocron.crontab('0 0 * * *', func=lambda: check_subscriptions_ending_soon(bot, days_threshold=3), start=True)
+    aiocron.crontab('57 17 * * *', func=lambda: check_expired_subscriptions(bot), start=True)
+    aiocron.crontab('57 17 * * *', func=lambda: check_subscriptions_ending_soon(bot, days_threshold=1), start=True)
+    aiocron.crontab('57 17 * * *', func=lambda: check_subscriptions_ending_soon(bot, days_threshold=3), start=True)
     
     logger.info("Cron-задачи настроены")
-    logger.info("Бот успешно запущен!")
-
-async def on_startup(bot: Bot):
-    """Действия при запуске бота"""
-    logger.info("Инициализация базы данных...")
-    await init_db()
-    
-    logger.info("Инициализация тарифных планов...")
-    await init_tariff_plans()
-    
-    logger.info("Инициализация методов оплаты...")
-    await init_payment_methods()
-        
     logger.info("Бот успешно запущен!")
 
 

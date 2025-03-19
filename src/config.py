@@ -87,7 +87,10 @@ class ChannelConfig:
     sponsor_channel_id: Optional[int] = None  # Sponsor channel ID
     sponsor_channel_link: Optional[str] = None  # Sponsor channel link
 
-
+    content_channel_id: Optional[int] = None
+    content_channel_link: Optional[str] = None
+    content_channel_name: Optional[str] = None
+    
 @dataclass
 class LocalizationConfig:
     """Localization settings"""
@@ -171,6 +174,11 @@ def load_config(env_path: Optional[str] = None) -> Config:
     
     multi_channel_mode = os.getenv('MULTI_CHANNEL_MODE', '').lower() in ('true', '1', 'yes')
     
+    content_channel_id_str = os.getenv('CONTENT_CHANNEL_ID')
+    content_channel_id = int(content_channel_id_str) if content_channel_id_str else None
+    content_channel_link = os.getenv('CONTENT_CHANNEL_LINK', '')
+    content_channel_name = os.getenv('CONTENT_CHANNEL_NAME', 'Premium Content')
+    
     channels = []
     if multi_channel_mode:
         channel_count = int(os.getenv('CHANNEL_COUNT', '0'))
@@ -212,6 +220,7 @@ def load_config(env_path: Optional[str] = None) -> Config:
             sponsor_channel_link=os.getenv('SPONSOR_CHANNEL_LINK', ''),
             require_subscription=os.getenv('REQUIRE_SUBSCRIPTION', 'true').lower() in ('true', '1', 'yes')
         ),
+        
         admin=admin_config,  # Admin configuration
         payment=PaymentConfig(
             manual_payment_enabled=manual_payment_enabled,
@@ -239,7 +248,10 @@ def load_config(env_path: Optional[str] = None) -> Config:
         channels=ChannelConfig(
             multi_channel_mode=multi_channel_mode,
             sponsor_channel_id=int(os.getenv('SPONSOR_CHANNEL_ID', '0')),
-            sponsor_channel_link=os.getenv('SPONSOR_CHANNEL_LINK', '')
+            sponsor_channel_link=os.getenv('SPONSOR_CHANNEL_LINK', ''),
+            content_channel_id=content_channel_id,
+            content_channel_link=content_channel_link,
+            content_channel_name=content_channel_name
         ),
         webapp=WebAppConfig(
             host=os.getenv('WEB_HOST', '0.0.0.0'),

@@ -1,5 +1,6 @@
 from aiogram import Router, F
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from src.db.DALS.channel import ChannelDAL
 from src.filters.admin import AdminFilter
 from src.db.DALS.payment import PaymentDAL
 from src.db.DALS.subscription import SubscriptionDAL
@@ -17,7 +18,7 @@ async def approve_payment(callback: CallbackQuery):
     
     
     payment_id = int(callback.data.split(":")[1])
-    
+    logger.info(payment_id)
     result = await PaymentDAL.approve_payment(payment_id)
     
     if not result:
@@ -34,6 +35,8 @@ async def approve_payment(callback: CallbackQuery):
     
     subscription, plan = subscription_result
     
+    channel = await ChannelDAL.get_by_id(plan.channel_id)
+    
     await callback.bot.send_message(
         chat_id=user.user_id,
         text=(
@@ -41,7 +44,13 @@ async def approve_payment(callback: CallbackQuery):
             f"Вы успешно оформили подписку на тариф: {plan.name}\n"
             f"Срок действия: до {subscription.end_date.strftime('%d.%m.%Y')}\n"
             f"Спасибо за покупку!"
-        ), parse_mode='HTML'
+        ),
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text='Ссылка', url=channel.invite_link)]
+            ]
+        ),
+        parse_mode='HTML'
     )
     
     await callback.answer("Платеж подтвержден и подписка активирована", show_alert=True)
