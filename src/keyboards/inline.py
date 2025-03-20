@@ -166,6 +166,7 @@ class AdminKeyboard:
         builder.add(
             InlineKeyboardButton(text="📊 Статистика", callback_data="admin:statistics"),
             InlineKeyboardButton(text="📨 Рассылка", callback_data="admin:broadcast"),
+            InlineKeyboardButton(text="📝 Изменить приветствие", callback_data="edit_welcome_message"),
         )
         logger.info(config.admin.manage_tariffs_enabled)
         if config.admin.manage_tariffs_enabled:

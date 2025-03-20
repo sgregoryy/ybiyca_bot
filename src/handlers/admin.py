@@ -222,3 +222,54 @@ async def manage_channels(callback: CallbackQuery):
 async def back_to_admin_menu(callback: CallbackQuery):
     await callback.message.edit_text("👑 Панель администратора", reply_markup=AdminKeyboard.admin_menu())
     await callback.answer()
+
+
+@router.callback_query(F.data == "edit_welcome_message")
+async def edit_welcome_message_cmd(callback: CallbackQuery, state: FSMContext):
+    """Handler for editing welcome message"""
+    # Check if user is admin
+    if callback.from_user.id not in config.telegram.admin_ids:
+        await callback.answer("У вас нет доступа к этой функции", show_alert=True)
+        return
+    
+    # Read current welcome message from config file
+    try:
+        with open("welcome_message.txt", "r", encoding="utf-8") as f:
+            current_msg = f.read().strip()
+    except:
+        current_msg = "👋 Добро пожаловать, {first_name}!\n\nВыберите действие из меню"
+    
+    await state.set_state(AdminStates.waiting_for_welcome_message)
+    
+    await callback.message.answer(
+        f"Текущее приветственное сообщение:\n\n"
+        f"{current_msg}\n\n"
+        f"Отправьте новое приветственное сообщение.\n"
+    )
+    
+    await callback.answer()
+    
+    
+@router.message(AdminStates.waiting_for_welcome_message)
+async def save_welcome_message(message: Message, state: FSMContext):
+    """Save the new welcome message"""
+    # Check if user is admin
+    if message.from_user.id not in config.telegram.admin_ids:
+        return
+    
+    new_message = message.text
+    
+    if not new_message:
+        await message.answer("Сообщение не может быть пустым. Пожалуйста, отправьте текст сообщения.")
+        return
+    
+    # Save to file
+    with open("welcome_message.txt", "w", encoding="utf-8") as f:
+        f.write(new_message)
+    
+    await state.clear()
+    
+    await message.answer(
+        f"✅ Приветственное сообщение успешно изменено!\n\n"
+        f"Новое сообщение:\n{new_message}"
+    )

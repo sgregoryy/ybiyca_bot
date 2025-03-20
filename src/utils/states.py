@@ -33,3 +33,5 @@ class AdminStates(StatesGroup):
     waiting_for_channel_new_value = State()
 
     waiting_for_confirmation = State()
+    
+    waiting_for_welcome_message = State()
