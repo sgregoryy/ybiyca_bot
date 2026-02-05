@@ -9,10 +9,11 @@ from src.db.DALS.payment import PaymentDAL
 from src.db.DALS.user import UserDAL
 from src.db.DALS.subscription import SubscriptionDAL
 from src.db.DALS.currency import CurrencyDAL
+from src.db.DALS.channel import ChannelDAL
 
 from datetime import datetime
 from aiogram import Bot
-from aiogram.types import CallbackQuery, InlineKeyboardButton
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from yookassa import Configuration, Payment
 
@@ -154,8 +155,11 @@ async def process_payment_notification(notification_data: dict) -> bool:
 
         if subscription_result:
             subscription, plan = subscription_result
+            channel = await ChannelDAL.get_by_id(plan.channel_id)
 
             try:
+                if channel:
+                    await bot.unban_chat_member(chat_id=channel.channel_id, user_id=user.user_id)
 
                 await bot.send_message(
                     chat_id=user.user_id,
@@ -166,6 +170,11 @@ async def process_payment_notification(notification_data: dict) -> bool:
                         f"Дата окончания: <b>{subscription.end_date.strftime('%d.%m.%Y')}</b>\n\n"
                         f"Благодарим за оплату! Ваша подписка активирована."
                     ),
+                    reply_markup=InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [InlineKeyboardButton(text="🔗 Вступить в канал", url=channel.invite_link)]
+                        ]
+                    ) if channel else None,
                     parse_mode="HTML",
                 )
 

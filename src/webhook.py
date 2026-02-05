@@ -35,7 +35,7 @@ async def yoo_notify(req: Request):
             return Response(content="OK", status_code=200)
         else:
             logger.warning(f"Failed to process YouKassa notification: {notification}")
-            return Response(content="Processing failed", status_code=500)
+            return Response(content="Ok", status_code=200)
             
     except json.JSONDecodeError:
         logger.error("Invalid JSON in YouKassa notification")
