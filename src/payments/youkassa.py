@@ -115,16 +115,16 @@ async def process_payment_notification(notification_data: dict) -> bool:
             return False
 
         metadata = payment_data.get("metadata", {})
-        user_id = metadata.get("user_id")
+        telegram_id = metadata.get("user_id")  # This is telegram ID, not internal DB ID
         plan_id = metadata.get("plan_id")
 
-        if not user_id or not plan_id:
+        if not telegram_id or not plan_id:
             logger.error(f"Missing user_id or plan_id in YooKassa payment metadata: {metadata}")
             return False
 
-        user = await UserDAL.get_by_id(int(user_id))
+        user = await UserDAL.get_by_telegram_id(int(telegram_id))
         if not user:
-            logger.error(f"User {user_id} not found")
+            logger.error(f"User with telegram_id {telegram_id} not found")
             return False
 
         amount = float(payment_data.get("amount", {}).get("value", 0))
@@ -147,7 +147,7 @@ async def process_payment_notification(notification_data: dict) -> bool:
                 return False
 
             payment = await PaymentDAL.create_payment(
-                user_id=int(user_id),
+                user_id=user.id,  # Use internal DB ID
                 plan_id=int(plan_id),
                 currency_id=currency.id,
                 amount=amount,
@@ -156,7 +156,7 @@ async def process_payment_notification(notification_data: dict) -> bool:
                 status="approved",
             )
 
-        subscription_result = await SubscriptionDAL.create_subscription(int(user_id), int(plan_id))
+        subscription_result = await SubscriptionDAL.create_subscription(user.id, int(plan_id))
 
         if subscription_result:
             subscription, plan = subscription_result
