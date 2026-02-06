@@ -228,7 +228,7 @@ async def yookassa_payment_route(
         user_id=event.from_user.id,
         plan_id=plan.id,
         email=email,
-        description=f"Оплата тарифа {plan.name}",
+        description=f"Оплата тарифа {plan.name[:10]}",
     )
 
     if not payment:
