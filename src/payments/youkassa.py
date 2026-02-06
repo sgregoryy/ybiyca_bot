@@ -214,20 +214,25 @@ async def yookassa_payment_route(callback: CallbackQuery, plan: TariffPlan, defa
         user_id=user.id, plan_id=plan.id, currency_id=default_currency.id, amount=final_price, payment_method_id=payment_method.id
     )
 
-    payment = create_payment(
+    payment = await create_payment(
         amount=final_price,
         user_id=callback.from_user.id,
         plan_id=plan.id,
         description=f"Оплата тарифа {plan.name}",
     )
 
-    if hasattr(payment, "id"):
-        await PaymentDAL.update_payment(payment_id=payment_record.id, external_id=payment.id)
+    if not payment:
+        logger.error("Error creating YouKassa payment: payment is None")
+        await callback.answer("Ошибка при создании платежа. Попробуйте позже.", show_alert=True)
+        return
+
+    if payment.get("payment_id"):
+        await PaymentDAL.update_payment(payment_id=payment_record.id, external_id=payment["payment_id"])
 
     builder = InlineKeyboardBuilder()
 
-    if hasattr(payment.confirmation, "confirmation_url"):
-        payment_url = payment.confirmation_url
+    if payment.get("confirmation_url"):
+        payment_url = payment["confirmation_url"]
         builder.add(InlineKeyboardButton(text=f"💰 Оплатить {final_price}₽", url=payment_url))
     else:
         logger.error(f"Error creating YouKassa payment: {payment}")
