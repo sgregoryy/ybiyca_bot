@@ -218,7 +218,7 @@ async def yookassa_payment_route(callback: CallbackQuery, plan: TariffPlan, defa
         amount=final_price,
         user_id=callback.from_user.id,
         plan_id=plan.id,
-        description=f"Оплата тарифа {plan.name}",
+        description=f"Оплата тарифа {plan.name[:10]}",
     )
 
     if not payment:
