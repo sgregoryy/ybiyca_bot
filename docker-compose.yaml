@@ -5,4 +5,5 @@ services:
     restart: always
     volumes:
       - ./logs:/app/logs
+      - .:/src
     network_mode: "host"  
