@@ -1,6 +1,6 @@
 import uuid
 import logging
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Tuple, Union
 
 from src.config import config
 
@@ -14,7 +14,7 @@ from src.db.DALS.payment_method import PaymentMethodDAL
 
 from datetime import datetime
 from aiogram import Bot
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery, Message, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from yookassa import Configuration, Payment
 
@@ -197,17 +197,26 @@ async def process_payment_notification(notification_data: dict) -> bool:
         return False
 
 
-async def yookassa_payment_route(callback: CallbackQuery, plan: TariffPlan, default_currency, final_price):
+async def yookassa_payment_route(
+    event: Union[CallbackQuery, Message],
+    plan: TariffPlan,
+    default_currency,
+    final_price,
+    email: Optional[str] = None
+):
     user = await UserDAL.get_or_create(
-        telegram_id=callback.from_user.id,
-        username=callback.from_user.username,
-        full_name=f"{callback.from_user.first_name} {callback.from_user.last_name or ''}",
+        telegram_id=event.from_user.id,
+        username=event.from_user.username,
+        full_name=f"{event.from_user.first_name} {event.from_user.last_name or ''}",
     )
 
     payment_method = await PaymentMethodDAL.get_by_code("youkassa")
     if not payment_method:
         logger.error("youkassa payment method not found")
-        await callback.answer("Ошибка: метод оплаты не найден.", show_alert=True)
+        if isinstance(event, CallbackQuery):
+            await event.answer("Ошибка: метод оплаты не найден.", show_alert=True)
+        else:
+            await event.answer("Ошибка: метод оплаты не найден.")
         return
 
     payment_record = await PaymentDAL.create_payment(
@@ -216,14 +225,18 @@ async def yookassa_payment_route(callback: CallbackQuery, plan: TariffPlan, defa
 
     payment = await create_payment(
         amount=final_price,
-        user_id=callback.from_user.id,
+        user_id=event.from_user.id,
         plan_id=plan.id,
-        description=f"Оплата тарифа {plan.name[:10]}",
+        email=email,
+        description=f"Оплата тарифа {plan.name}",
     )
 
     if not payment:
         logger.error("Error creating YouKassa payment: payment is None")
-        await callback.answer("Ошибка при создании платежа. Попробуйте позже.", show_alert=True)
+        if isinstance(event, CallbackQuery):
+            await event.answer("Ошибка при создании платежа. Попробуйте позже.", show_alert=True)
+        else:
+            await event.answer("Ошибка при создании платежа. Попробуйте позже.")
         return
 
     if payment.get("payment_id"):
@@ -236,18 +249,32 @@ async def yookassa_payment_route(callback: CallbackQuery, plan: TariffPlan, defa
         builder.add(InlineKeyboardButton(text=f"💰 Оплатить {final_price}₽", url=payment_url))
     else:
         logger.error(f"Error creating YouKassa payment: {payment}")
-        await callback.answer("Ошибка при создании платежа. Попробуйте позже.", show_alert=True)
+        if isinstance(event, CallbackQuery):
+            await event.answer("Ошибка при создании платежа. Попробуйте позже.", show_alert=True)
+        else:
+            await event.answer("Ошибка при создании платежа. Попробуйте позже.")
         return
 
     builder.add(InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_payment"))
 
     builder.adjust(1)
 
-    await callback.message.edit_text(
-        f"💰 <b>Оплата через ЮKassa</b>\n\n"
-        f"Тариф: <b>{plan.name}</b>\n"
-        f"Сумма к оплате: <b>{final_price}₽</b>\n\n"
-        f"Для оплаты нажмите на кнопку ниже. После успешной оплаты подписка будет активирована автоматически.",
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML",
-    )
+    # Отправляем сообщение в зависимости от типа события
+    if isinstance(event, CallbackQuery):
+        await event.message.edit_text(
+            f"💰 <b>Оплата через ЮKassa</b>\n\n"
+            f"Тариф: <b>{plan.name}</b>\n"
+            f"Сумма к оплате: <b>{final_price}₽</b>\n\n"
+            f"Для оплаты нажмите на кнопку ниже. После успешной оплаты подписка будет активирована автоматически.",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML",
+        )
+    else:
+        await event.answer(
+            f"💰 <b>Оплата через ЮKassa</b>\n\n"
+            f"Тариф: <b>{plan.name}</b>\n"
+            f"Сумма к оплате: <b>{final_price}₽</b>\n\n"
+            f"Для оплаты нажмите на кнопку ниже. После успешной оплаты подписка будет активирована автоматически.",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML",
+        )

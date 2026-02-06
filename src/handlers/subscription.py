@@ -303,7 +303,10 @@ async def process_payment_method(callback: CallbackQuery, state: FSMContext, met
     if method_code == "manual":
         await process_manual_payment(callback, state, plan, channel, payment_method, default_currency, final_price)
     elif method_code == "youkassa":
-        await yookassa_payment_route(callback, plan, default_currency, final_price)
+        await state.update_data(final_price=final_price)
+        await callback.message.edit_text("📧 Введите электронную почту для получения чека:")
+        await state.set_state(PaymentStates.waiting_for_email)
+        return
     elif method_code == "tinkoff":
         await tinkoff_payment_route(callback, plan, default_currency, final_price)
     elif method_code == "cryptobot":
@@ -355,6 +358,37 @@ async def cancel_payment_process(callback: CallbackQuery, state: FSMContext):
     await state.clear()
 
     await back_to_channels_list(callback)
+
+
+@router.message(PaymentStates.waiting_for_email, F.text)
+async def process_youkassa_email(message: Message, state: FSMContext):
+    """Обработка ввода email для ЮKassa"""
+    email = message.text.strip()
+
+    # Простая валидация email
+    if "@" not in email or "." not in email:
+        await message.answer("❌ Пожалуйста, введите корректный email:")
+        return
+
+    data = await state.get_data()
+    plan_id = data.get("selected_plan_id")
+    currency_id = data.get("selected_currency_id")
+    final_price = data.get("final_price")
+
+    plan = await TariffDAL.get_by_id(plan_id)
+    if not plan:
+        await message.answer("Ошибка: тарифный план не найден")
+        await state.clear()
+        return
+
+    currency = await CurrencyDAL.get_by_id(currency_id)
+    if not currency:
+        await message.answer("Ошибка: валюта не найдена")
+        await state.clear()
+        return
+
+    await state.clear()
+    await yookassa_payment_route(message, plan, currency, final_price, email)
 
 
 @router.message(PaymentStates.waiting_for_payment_screenshot, F.photo)

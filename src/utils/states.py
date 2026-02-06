@@ -6,6 +6,7 @@ class PaymentStates(StatesGroup):
     waiting_for_admin_approval = State()
     waiting_for_payment_method = State()
     waiting_for_payment_confirmation = State()
+    waiting_for_email = State()
 
 
 class AdminStates(StatesGroup):
