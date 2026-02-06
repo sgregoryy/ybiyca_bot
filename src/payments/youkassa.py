@@ -10,6 +10,7 @@ from src.db.DALS.user import UserDAL
 from src.db.DALS.subscription import SubscriptionDAL
 from src.db.DALS.currency import CurrencyDAL
 from src.db.DALS.channel import ChannelDAL
+from src.db.DALS.payment_method import PaymentMethodDAL
 
 from datetime import datetime
 from aiogram import Bot
@@ -140,15 +141,19 @@ async def process_payment_notification(notification_data: dict) -> bool:
                 logger.error("RUB currency not found")
                 return False
 
+            payment_method = await PaymentMethodDAL.get_by_code("youkassa")
+            if not payment_method:
+                logger.error("youkassa payment method not found")
+                return False
+
             payment = await PaymentDAL.create_payment(
                 user_id=int(user_id),
                 plan_id=int(plan_id),
                 currency_id=currency.id,
                 amount=amount,
-                payment_method="youkassa",
+                payment_method_id=payment_method.id,
                 external_id=payment_id,
                 status="approved",
-                processed_at=datetime.now(),
             )
 
         subscription_result = await SubscriptionDAL.create_subscription(int(user_id), int(plan_id))
@@ -199,8 +204,14 @@ async def yookassa_payment_route(callback: CallbackQuery, plan: TariffPlan, defa
         full_name=f"{callback.from_user.first_name} {callback.from_user.last_name or ''}",
     )
 
+    payment_method = await PaymentMethodDAL.get_by_code("youkassa")
+    if not payment_method:
+        logger.error("youkassa payment method not found")
+        await callback.answer("Ошибка: метод оплаты не найден.", show_alert=True)
+        return
+
     payment_record = await PaymentDAL.create_payment(
-        user_id=user.id, plan_id=plan.id, currency_id=default_currency.id, amount=final_price, payment_method="youkassa"
+        user_id=user.id, plan_id=plan.id, currency_id=default_currency.id, amount=final_price, payment_method_id=payment_method.id
     )
 
     payment = create_payment(

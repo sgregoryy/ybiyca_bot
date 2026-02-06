@@ -11,6 +11,7 @@ from src.config import config
 from src.db.DALS.payment import PaymentDAL
 from src.db.DALS.user import UserDAL
 from src.db.DALS.subscription import SubscriptionDAL
+from src.db.DALS.payment_method import PaymentMethodDAL
 from aiogram import Bot
 from aiogram.types import CallbackQuery, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -260,12 +261,24 @@ async def tinkoff_payment_route(callback: CallbackQuery, plan: TariffPlan, defau
         await callback.answer("Оплата через Тинькофф временно недоступна", show_alert=True)
         return
 
+    payment_method = await PaymentMethodDAL.get_by_code("tinkoff")
+    if not payment_method:
+        logger.error("tinkoff payment method not found")
+        await callback.answer("Ошибка: метод оплаты не найден.", show_alert=True)
+        return
+
+    user = await UserDAL.get_or_create(
+        telegram_id=callback.from_user.id,
+        username=callback.from_user.username,
+        full_name=f"{callback.from_user.first_name} {callback.from_user.last_name or ''}",
+    )
+
     payment_record = await PaymentDAL.create_payment(
-        user_id=callback.from_user.id,
+        user_id=user.id,
         plan_id=plan.id,
         currency_id=default_currency.id,
         amount=final_price,
-        payment_method="tinkoff",
+        payment_method_id=payment_method.id,
     )
 
     description = f"Оплата тарифа {plan.name}"
